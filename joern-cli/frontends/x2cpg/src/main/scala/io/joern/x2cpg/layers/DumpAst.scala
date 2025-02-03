@@ -1,7 +1,7 @@
 package io.joern.x2cpg.layers
 
 import better.files.File
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext, LayerCreatorOptions}
 
 case class AstDumpOptions(var outDir: String) extends LayerCreatorOptions {}
@@ -20,7 +20,7 @@ class DumpAst(options: AstDumpOptions) extends LayerCreator {
   override val description: String       = DumpAst.description
   override val storeOverlayName: Boolean = false
 
-  override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit = {
+  override def create(context: LayerCreatorContext): Unit = {
     val cpg = context.cpg
     cpg.method.zipWithIndex.foreach { case (method, i) =>
       val str = method.dotAst.head

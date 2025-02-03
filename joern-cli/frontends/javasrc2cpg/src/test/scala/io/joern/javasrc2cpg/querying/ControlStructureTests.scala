@@ -1,7 +1,6 @@
 package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.joern.javasrc2cpg.util.NameConstants
 import io.shiftleft.codepropertygraph.generated.edges.Ref
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{
@@ -12,22 +11,51 @@ import io.shiftleft.codepropertygraph.generated.nodes.{
   Identifier,
   Literal,
   Local,
-  Return
+  Return,
+  TypeRef
 }
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.toNodeTraversal
+import io.shiftleft.semanticcpg.language.*
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class NewControlStructureTests extends JavaSrcCode2CpgFixture {
+
+  "try with multiple catches and finally" should {
+    val cpg = code("""
+        |public class Foo {
+        |  static void foo() {
+        |    try { foo(); }
+        |    catch (SomeException x1) { x1(); }
+        |    catch (OtherException x2) { x2(); }
+        |    finally { bar(); }
+        |  }
+        |}
+        |""".stripMargin)
+
+    "create correct control structures" in {
+      inside(cpg.controlStructure.isTry.l) { case List(t) =>
+        val List(tryBlock) = t.astChildren.isBlock.l
+        tryBlock.order shouldBe 1
+        tryBlock.astChildren.isCall.code.l shouldBe List("foo()")
+        val List(catchX1, catchX2) = t.astChildren.isControlStructure.isCatch.l
+        catchX1.order shouldBe 2
+        catchX1.astChildren.isBlock.astChildren.isCall.code.l shouldBe List("x1()")
+        catchX2.order shouldBe 3
+        catchX2.astChildren.isBlock.astChildren.isCall.code.l shouldBe List("x2()")
+        val List(finallyNode) = t.astChildren.isControlStructure.isFinally.l
+        finallyNode.order shouldBe 4
+        finallyNode.astChildren.isBlock.astChildren.isCall.code.l shouldBe List("bar()")
+      }
+    }
+  }
+
   "try-with-resource blocks" should {
     val cpg = code("""
-				|import java.io.FileReader;
+		|import java.io.FileReader;
         |import java.io.IOException;
         |import java.io.BufferedReader;
-				|
+	    |
         |public class Foo {
-        |
         |    static String foo(String path) throws IOException {
         |        try (FileReader fr = new FileReader(path);
         |             BufferedReader br = new BufferedReader(fr)) {
@@ -53,14 +81,14 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
           frLocal.typeFullName shouldBe "java.io.FileReader"
 
           frAssign.name shouldBe Operators.assignment
-          val List(frAssignLhs: Identifier, frAssignRhs: Call) = frAssign.argument.l
+          val List(frAssignLhs: Identifier, frAssignRhs: Call) = frAssign.argument.l: @unchecked
           frAssignLhs.name shouldBe "fr"
           frAssignLhs.typeFullName shouldBe "java.io.FileReader"
           frAssignRhs.name shouldBe Operators.alloc
           frAssignRhs.typeFullName shouldBe "java.io.FileReader"
 
           frInit.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
-          val List(frInitThis: Identifier, frInitArg: Identifier) = frInit.argument.l
+          val List(frInitThis: Identifier, frInitArg: Identifier) = frInit.argument.l: @unchecked
           frInitThis.name shouldBe "fr"
           frInitThis.typeFullName shouldBe "java.io.FileReader"
           frInitArg.name shouldBe "path"
@@ -71,14 +99,14 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
           brLocal.typeFullName shouldBe "java.io.BufferedReader"
 
           brAssign.name shouldBe Operators.assignment
-          val List(brAssignLhs: Identifier, brAssignRhs: Call) = brAssign.argument.l
+          val List(brAssignLhs: Identifier, brAssignRhs: Call) = brAssign.argument.l: @unchecked
           brAssignLhs.name shouldBe "br"
           brAssignLhs.typeFullName shouldBe "java.io.BufferedReader"
           brAssignRhs.name shouldBe Operators.alloc
           brAssignRhs.typeFullName shouldBe "java.io.BufferedReader"
 
           brInit.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
-          val List(brInitThis: Identifier, brInitArg: Identifier) = brInit.argument.l
+          val List(brInitThis: Identifier, brInitArg: Identifier) = brInit.argument.l: @unchecked
           brInitThis.name shouldBe "br"
           brInitThis.typeFullName shouldBe "java.io.BufferedReader"
           brInitArg.name shouldBe "fr"
@@ -87,7 +115,7 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
           tryBlock.controlStructureType shouldBe ControlStructureTypes.TRY
           tryBlock.astChildren.l match {
             case List(block: Block) =>
-              val List(returnStmt: Return) = block.astChildren.l
+              val List(returnStmt: Return) = block.astChildren.l: @unchecked
               returnStmt.code shouldBe "return br.readLine();"
 
             case result => fail(s"Expected single block as try body but got $result")
@@ -100,17 +128,17 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
 
   "foreach loops over arrays imported through static imports" should {
     val cpg = code("""
-		|import static Bar.STATIC_ARR;
-		|public class Foo {
-		|  public static void sink(String s) {}
-		|
-		|  public static void foo() {
-		|    for (String s : STATIC_ARR) {
-		|      sink(s);
-		|    }
-		|  }
-		|}
-		|""".stripMargin)
+        |import static Bar.STATIC_ARR;
+        |public class Foo {
+        |  public static void sink(String s) {}
+        |
+        |  public static void foo() {
+        |    for (String s : STATIC_ARR) {
+        |      sink(s);
+        |    }
+        |  }
+        |}
+        |""".stripMargin)
       .moreCode(
         """
         |public class Bar {
@@ -120,11 +148,20 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
         fileName = "Bar.java"
       )
 
-    "create the correct number of STATIC_ARR identifiers" in {
-      // One in definition in class Bar
-      // One in fieldAccess STATIC_ARR.length
-      // One in indexAccess STATIC_ARR[tmpIdx]
-      cpg.identifier.name("STATIC_ARR").size shouldBe 3
+    "have the correct assignment target in the clinit block of the defining class" in {
+      inside(cpg.typeDecl.name("Bar").method.nameExact("<clinit>").body.astChildren.l) { case List(assignment: Call) =>
+        assignment.name shouldBe Operators.assignment
+
+        inside(assignment.argument.l) { case List(fieldAccess: Call, _: Call) =>
+          fieldAccess.name shouldBe Operators.fieldAccess
+          fieldAccess.typeFullName shouldBe "java.lang.String[]"
+
+          inside(fieldAccess.argument.l) { case List(barTypeRef: TypeRef, staticArr: FieldIdentifier) =>
+            barTypeRef.typeFullName shouldBe "Bar"
+            staticArr.canonicalName shouldBe "STATIC_ARR"
+          }
+        }
+      }
     }
 
     "not create REF edges from the STATIC_ARR identifiers to the import identifier used only during AST generation" in {
@@ -134,16 +171,16 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
 
   "foreach loops over native array initialization expressions" should {
     val cpg = code("""
-                     |public class Foo {
-                     |  public static void sink(String s) {}
-                     |
-                     |  public static void foo() {
-                     |    for (String item : new String[] {"a", "b", "c"}) {
-                     |      sink(item);
-                     |    }
-                     |  }
-                     |}
-                     |""".stripMargin)
+       |public class Foo {
+       |  public static void sink(String s) {}
+       |
+       |  public static void foo() {
+       |    for (String item : new String[] {"a", "b", "c"}) {
+       |      sink(item);
+       |    }
+       |  }
+       |}
+       |""".stripMargin)
 
     "create a local node for the array" in {
       val local = cpg.method.name("foo").local.nameExact("$iterLocal0").l match {
@@ -330,10 +367,10 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
           indexAccess.typeFullName shouldBe "java.lang.String"
           indexAccess.order shouldBe 2
           indexAccess.argumentIndex shouldBe 2
-          val (iterLocal: Identifier, idx: Identifier) = indexAccess.argument.l match {
+          val (iterLocal: Identifier, idx: Identifier) = (indexAccess.argument.l match {
             case List(items: Identifier, idx: Identifier) => (items, idx)
             case result                                   => s"Expected iterLocal0[idx] args but got $result"
-          }
+          }): @unchecked
           iterLocal.name shouldBe "$iterLocal0"
           iterLocal.typeFullName shouldBe "java.lang.String[]"
           iterLocal.order shouldBe 1
@@ -510,10 +547,10 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
           indexAccess.typeFullName shouldBe "java.lang.String"
           indexAccess.order shouldBe 2
           indexAccess.argumentIndex shouldBe 2
-          val (items: Identifier, idx: Identifier) = indexAccess.argument.l match {
+          val (items: Identifier, idx: Identifier) = (indexAccess.argument.l match {
             case List(items: Identifier, idx: Identifier) => (items, idx)
             case result                                   => s"Expected items[idx] args but got $result"
-          }
+          }): @unchecked
           items.name shouldBe "items"
           items.typeFullName shouldBe "java.lang.String[]"
           items.order shouldBe 1
@@ -546,18 +583,18 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
 
   "foreach loops over collections" should {
     val cpg = code("""
-                     |import java.util.List;
-                     |
-                     |public class Foo {
-                     |  public static void sink(String s) {}
-                     |
-                     |  public static void foo(List<String> items) {
-                     |    for (String item : items) {
-                     |      sink(item);
-                     |    }
-                     |  }
-                     |}
-                     |""".stripMargin)
+       |import java.util.List;
+       |
+       |public class Foo {
+       |  public static void sink(String s) {}
+       |
+       |  public static void foo(List<String> items) {
+       |    for (String item : items) {
+       |      sink(item);
+       |    }
+       |  }
+       |}
+       |""".stripMargin)
 
     "create a local for the iterator as a child of the FOR block" in {
       val iterLocal = cpg.method.name("foo").body.astChildren.l match {
@@ -602,7 +639,7 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
       iteratorCall.order shouldBe 2
       iteratorCall.argumentIndex shouldBe 2
 
-      iteratorCall.argument(0).l match {
+      iteratorCall.argument(0).start.l match {
         case List(items: Identifier) =>
           items.name shouldBe "items"
           items.typeFullName shouldBe "java.util.List"
@@ -631,7 +668,7 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
       conditionCall.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
       conditionCall.order shouldBe 1
 
-      conditionCall.argument(0).l match {
+      conditionCall.argument(0).start.l match {
         case List(receiver: Identifier) =>
           receiver.name shouldBe "$iterLocal0"
           receiver.typeFullName shouldBe "java.util.Iterator"
@@ -688,7 +725,7 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
       assignSource.typeFullName shouldBe "java.lang.Object"
       assignSource.order shouldBe 2
       assignSource.argumentIndex shouldBe 2
-      assignSource.argument(0).l match {
+      assignSource.argument(0).start.l match {
         case List(iterIdent: Identifier) =>
           iterIdent.name shouldBe "$iterLocal0"
           iterIdent.typeFullName shouldBe "java.util.Iterator"
@@ -721,7 +758,7 @@ class NewControlStructureTests extends JavaSrcCode2CpgFixture {
 
 class ControlStructureTests extends JavaSrcCode2CpgFixture {
 
-  val cpg = code("""
+  private val cpg = code("""
       |class Foo {
       |  int baz(Iterable<Integer> xs) {
       |    int sum = 0;
@@ -826,7 +863,7 @@ class ControlStructureTests extends JavaSrcCode2CpgFixture {
   "should identify an else block" in {
     val ifBlock = cpg.method.name("elseTest").ifBlock.head
     ifBlock.code shouldBe "if (b)"
-    val List(condition: Identifier, thenBlock: Block, elseBlock: ControlStructure) = ifBlock.astChildren.l
+    val List(condition: Identifier, thenBlock: Block, elseBlock: ControlStructure) = ifBlock.astChildren.l: @unchecked
     condition.code shouldBe "b"
     condition.order shouldBe 1
 
@@ -834,7 +871,7 @@ class ControlStructureTests extends JavaSrcCode2CpgFixture {
     val thenBody = thenBlock.astChildren.head.asInstanceOf[Call]
     thenBody.code shouldBe "x = 42"
     thenBody.argument.head.code shouldBe "x"
-    thenBody.argument.tail.head.code shouldBe "42"
+    thenBody.argument.l.tail.head.code shouldBe "42"
     thenBody.order shouldBe 1
 
     elseBlock.code shouldBe "else"
@@ -852,7 +889,7 @@ class ControlStructureTests extends JavaSrcCode2CpgFixture {
     }
 
     switchBlock.astChildren.size shouldBe 2
-    val List(cond: Identifier, body: Block) = switchBlock.astChildren.l
+    val List(cond: Identifier, body: Block) = switchBlock.astChildren.l: @unchecked
 
     cond.order shouldBe 1
     cond.code shouldBe "this"

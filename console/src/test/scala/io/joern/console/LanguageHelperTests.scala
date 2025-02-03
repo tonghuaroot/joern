@@ -1,7 +1,7 @@
 package io.joern.console
 
-import better.files.Dsl._
-import better.files._
+import better.files.Dsl.*
+import better.files.*
 import io.shiftleft.codepropertygraph.generated.Languages
 import io.joern.console.cpgcreation.{guessLanguage, LlvmCpgGenerator}
 import org.scalatest.matchers.should.Matchers
@@ -18,7 +18,7 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
     }
 
     "guess `C#` for .csproj" in {
-      guessLanguage("foo.csproj") shouldBe Some(Languages.CSHARP)
+      guessLanguage("foo.csproj") shouldBe Some(Languages.CSHARPSRC)
     }
 
     "guess `Go` for a .go file" in {
@@ -54,6 +54,14 @@ class LanguageHelperTests extends AnyWordSpec with Matchers {
         val subdir = mkdir(tmpDir / "subdir")
         touch(subdir / "package.json")
         guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.JSSRC)
+      }
+    }
+
+    "guess `Swift` for a directory containing `.swift`" in {
+      File.usingTemporaryDirectory("oculartests") { tmpDir =>
+        val subdir = mkdir(tmpDir / "subdir")
+        touch(subdir / "main.swift")
+        guessLanguage(tmpDir.pathAsString) shouldBe Some(Languages.SWIFTSRC)
       }
     }
 

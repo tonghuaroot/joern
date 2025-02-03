@@ -1,32 +1,37 @@
 package io.joern.jssrc2cpg.astcreation
 
 import io.joern.jssrc2cpg.Config
+import io.joern.jssrc2cpg.datastructures.MethodScope
 import io.joern.jssrc2cpg.datastructures.Scope
+import io.joern.jssrc2cpg.parser.BabelAst.*
 import io.joern.jssrc2cpg.parser.BabelJsonParser.ParseResult
-import io.joern.jssrc2cpg.parser.BabelAst._
 import io.joern.jssrc2cpg.parser.BabelNodeInfo
-import io.joern.jssrc2cpg.passes.Defines
-import io.joern.x2cpg.datastructures.Stack.{Stack, _}
-import io.joern.x2cpg.utils.NodeBuilders.methodReturnNode
-import io.joern.x2cpg.{Ast, AstCreatorBase}
+import io.joern.x2cpg.Ast
+import io.joern.x2cpg.AstCreatorBase
+import io.joern.x2cpg.ValidationMode
+import io.joern.x2cpg.AstNodeBuilder as X2CpgAstNodeBuilder
+import io.joern.x2cpg.datastructures.Global
+import io.joern.x2cpg.datastructures.Stack.*
+import io.joern.x2cpg.frontendspecific.jssrc2cpg.Defines
+import io.joern.x2cpg.utils.NodeBuilders.newMethodReturnNode
+import io.joern.x2cpg.utils.NodeBuilders.newModifierNode
+import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
+import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.NodeTypes
 import io.shiftleft.codepropertygraph.generated.nodes.NewBlock
 import io.shiftleft.codepropertygraph.generated.nodes.NewFile
-import io.shiftleft.codepropertygraph.generated.nodes.NewMethod
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
 import io.shiftleft.codepropertygraph.generated.nodes.NewTypeRef
-import org.slf4j.{Logger, LoggerFactory}
-import overflowdb.BatchedUpdate.DiffGraphBuilder
+import io.shiftleft.codepropertygraph.generated.DiffGraphBuilder
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import ujson.Value
 
-import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
 
-class AstCreator(
-  val config: Config,
-  val parserResult: ParseResult,
-  val usedTypes: ConcurrentHashMap[(String, String), Boolean]
+class AstCreator(val config: Config, val global: Global, val parserResult: ParseResult)(implicit
+  withSchemaValidation: ValidationMode
 ) extends AstCreatorBase(parserResult.filename)
     with AstForExpressionsCreator
     with AstForPrimitivesCreator
@@ -37,7 +42,8 @@ class AstCreator(
     with AstForTemplateDomCreator
     with AstNodeBuilder
     with TypeHelper
-    with AstCreatorHelper {
+    with AstCreatorHelper
+    with X2CpgAstNodeBuilder[BabelNodeInfo, AstCreator] {
 
   protected val logger: Logger = LoggerFactory.getLogger(classOf[AstCreator])
 
@@ -51,7 +57,6 @@ class AstCreator(
   protected val dynamicInstanceTypeStack      = new Stack[String]
   protected val localAstParentStack           = new Stack[NewBlock]()
   protected val rootTypeDecl                  = new Stack[NewTypeDecl]()
-  protected val typeFullNameToPostfix         = mutable.HashMap.empty[String, Int]
   protected val functionNodeToNameAndFullName = mutable.HashMap.empty[BabelNodeInfo, (String, String)]
   protected val usedVariableNames             = mutable.HashMap.empty[String, Int]
   protected val seenAliasTypes                = mutable.HashSet.empty[NewTypeDecl]
@@ -62,11 +67,10 @@ class AstCreator(
   protected val (positionToLineNumberMapping, positionToFirstPositionInLineMapping) =
     positionLookupTables(parserResult.fileContent)
 
-  // we want to keep it local, just like the old js2cpg did
-  override def absolutePath(filename: String): String = filename
-
   override def createAst(): DiffGraphBuilder = {
-    val fileNode       = NewFile().name(parserResult.filename).order(1)
+    val fileContent = if (!config.disableFileContent) Option(parserResult.fileContent) else None
+    val fileNode    = NewFile().name(parserResult.filename).order(0)
+    fileContent.foreach(fileNode.content(_))
     val namespaceBlock = globalNamespaceBlock()
     methodAstParentStack.push(namespaceBlock)
     val ast = Ast(fileNode).withChild(Ast(namespaceBlock).withChild(createProgramMethod()))
@@ -76,31 +80,16 @@ class AstCreator(
   }
 
   private def createProgramMethod(): Ast = {
-    val path            = parserResult.filename
-    val astNodeInfo     = createBabelNodeInfo(parserResult.json("ast"))
-    val lineNumber      = astNodeInfo.lineNumber
-    val columnNumber    = astNodeInfo.columnNumber
-    val lineNumberEnd   = astNodeInfo.lineNumberEnd
-    val columnNumberEnd = astNodeInfo.columnNumberEnd
-    val name            = ":program"
-    val fullName        = s"$path:$name"
+    val path        = parserResult.filename
+    val astNodeInfo = createBabelNodeInfo(parserResult.json("ast"))
+    val name        = Defines.Program
+    val fullName    = s"$path:$name"
 
     val programMethod =
-      NewMethod()
-        .order(1)
-        .name(name)
-        .code(name)
-        .fullName(fullName)
-        .filename(path)
-        .lineNumber(lineNumber)
-        .lineNumberEnd(lineNumberEnd)
-        .columnNumber(columnNumber)
-        .columnNumberEnd(columnNumberEnd)
-        .astParentType(NodeTypes.TYPE_DECL)
-        .astParentFullName(fullName)
+      methodNode(astNodeInfo, name, name, fullName, None, path, Some(NodeTypes.TYPE_DECL), Some(fullName)).order(1)
 
     val functionTypeAndTypeDeclAst =
-      createFunctionTypeAndTypeDeclAst(programMethod, methodAstParentStack.head, name, fullName, path)
+      createFunctionTypeAndTypeDeclAst(astNodeInfo, programMethod, methodAstParentStack.head, name, fullName, path)
     rootTypeDecl.push(functionTypeAndTypeDeclAst.nodes.head.asInstanceOf[NewTypeDecl])
 
     methodAstParentStack.push(programMethod)
@@ -111,19 +100,27 @@ class AstCreator(
     localAstParentStack.push(blockNode)
 
     val thisParam =
-      createParameterInNode("this", "this", 0, isVariadic = false, line = lineNumber, column = columnNumber)
+      parameterInNode(astNodeInfo, "this", "this", 0, false, EvaluationStrategies.BY_VALUE)
+        .dynamicTypeHintFullName(typeHintForThisExpression())
+    scope.addVariable("this", thisParam, MethodScope)
 
     val methodChildren = astsForFile(astNodeInfo)
     setArgumentIndices(methodChildren)
 
-    val methodReturn = methodReturnNode(Defines.Any, line = None, column = None)
+    val methodReturn = newMethodReturnNode(Defines.Any, line = None, column = None)
 
     localAstParentStack.pop()
     scope.popScope()
     methodAstParentStack.pop()
 
     functionTypeAndTypeDeclAst.withChild(
-      methodAst(programMethod, List(thisParam), Ast(blockNode).withChildren(methodChildren), methodReturn)
+      methodAst(
+        programMethod,
+        Ast(thisParam) :: Nil,
+        blockAst(blockNode, methodChildren),
+        methodReturn,
+        newModifierNode(ModifierTypes.MODULE) :: Nil
+      )
     )
   }
 
@@ -148,6 +145,9 @@ class AstCreator(
       case TSEnumDeclaration         => astForEnum(nodeInfo)
       case DeclareTypeAlias          => astForTypeAlias(nodeInfo)
       case TypeAlias                 => astForTypeAlias(nodeInfo)
+      case TypeCastExpression        => astForCastExpression(nodeInfo)
+      case TSTypeAssertion           => astForCastExpression(nodeInfo)
+      case TSTypeCastExpression      => astForCastExpression(nodeInfo)
       case TSTypeAliasDeclaration    => astForTypeAlias(nodeInfo)
       case NewExpression             => astForNewExpression(nodeInfo)
       case ThisExpression            => astForThisExpression(nodeInfo)
@@ -205,6 +205,7 @@ class AstCreator(
       case TemplateLiteral           => astForTemplateLiteral(nodeInfo)
       case TemplateElement           => astForTemplateElement(nodeInfo)
       case SpreadElement             => astForSpreadOrRestElement(nodeInfo)
+      case TSSatisfiesExpression     => astForTSSatisfiesExpression(nodeInfo)
       case JSXElement                => astForJsxElement(nodeInfo)
       case JSXOpeningElement         => astForJsxOpeningElement(nodeInfo)
       case JSXClosingElement         => astForJsxClosingElement(nodeInfo)
@@ -214,6 +215,7 @@ class AstCreator(
       case JSXSpreadAttribute        => astForJsxSpreadAttribute(nodeInfo)
       case JSXFragment               => astForJsxFragment(nodeInfo)
       case JSXAttribute              => astForJsxAttribute(nodeInfo)
+      case WithStatement             => astForWithStatement(nodeInfo)
       case EmptyStatement            => Ast()
       case DebuggerStatement         => Ast()
       case _                         => notHandledYet(nodeInfo)
@@ -243,4 +245,24 @@ class AstCreator(
 
   private def astsForProgram(program: BabelNodeInfo): List[Ast] = createBlockStatementAsts(program.json("body"))
 
+  protected def line(node: BabelNodeInfo): Option[Int]      = node.lineNumber
+  protected def column(node: BabelNodeInfo): Option[Int]    = node.columnNumber
+  protected def lineEnd(node: BabelNodeInfo): Option[Int]   = node.lineNumberEnd
+  protected def columnEnd(node: BabelNodeInfo): Option[Int] = node.columnNumberEnd
+  protected def code(node: BabelNodeInfo): String           = node.code
+
+  protected def nodeOffsets(node: Value): Option[(Int, Int)] = {
+    for {
+      startOffset <- start(node)
+      endOffset   <- end(node)
+    } yield (math.max(startOffset, 0), math.min(endOffset, parserResult.fileContent.length))
+  }
+
+  override protected def offset(node: BabelNodeInfo): Option[(Int, Int)] = {
+    Option
+      .when(!config.disableFileContent) {
+        nodeOffsets(node.json)
+      }
+      .flatten
+  }
 }

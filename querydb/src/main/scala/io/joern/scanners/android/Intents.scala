@@ -1,15 +1,15 @@
 package io.joern.scanners.android
 
-import io.joern.scanners._
-import io.joern.console._
+import io.joern.scanners.*
+import io.joern.console.*
 import io.joern.dataflowengineoss.queryengine.EngineContext
-import io.joern.dataflowengineoss.semanticsloader.Semantics
-import io.joern.macros.QueryMacros._
-import io.shiftleft.semanticcpg.language._
-import io.joern.dataflowengineoss.language._
+import io.joern.dataflowengineoss.semanticsloader.NoSemantics
+import io.joern.macros.QueryMacros.*
+import io.shiftleft.semanticcpg.language.*
+import io.joern.dataflowengineoss.language.*
 
 object Intents extends QueryBundle {
-  implicit val engineContext: EngineContext = EngineContext(Semantics.empty)
+  implicit val engineContext: EngineContext = EngineContext(NoSemantics)
   implicit val resolver: ICallResolver      = NoResolve
 
   @q
@@ -29,7 +29,7 @@ object Intents extends QueryBundle {
           exportedActivities.method.call.name("getIntent").typeFullName("android.content.Intent")
         def runtimeExecCalls =
           cpg.call.name("exec").typeFullName("java.lang.Process")
-        runtimeExecCalls.where(_.argument.reachableBy(getIntentCalls)).l
+        runtimeExecCalls.where(_.argument.reachableBy(getIntentCalls)).l.iterator
       }),
       tags = List(QueryTags.android),
       multiFileCodeExamples = MultiFileCodeExamples(

@@ -1,7 +1,7 @@
 package io.joern.console.workspacehandling
 
-import better.files._
-import io.shiftleft.codepropertygraph.Cpg
+import better.files.*
+import io.shiftleft.codepropertygraph.generated.Cpg
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -54,7 +54,7 @@ class WorkspaceManagerTests extends AnyWordSpec with Matchers {
         WorkspaceTests.createFakeProject(tmpDir, "1")
         val manager = new WorkspaceManager(tmpDir.toString)
         manager.numberOfProjects shouldBe 1
-        manager.reset()
+        manager.reset
         manager.numberOfProjects shouldBe 0
       }
     }
@@ -90,9 +90,9 @@ class WorkspaceManagerTests extends AnyWordSpec with Matchers {
         val manager = new WorkspaceManager[Project](workspaceFile.toString)
         manager.openProject(
           projectName,
-          { fileName: String =>
+          (fileName: String) => {
             fileName.endsWith("cpg.bin.tmp") shouldBe true
-            Some(Cpg.emptyCpg)
+            Some(Cpg.empty)
           }
         )
 
@@ -176,12 +176,7 @@ class WorkspaceManagerTests extends AnyWordSpec with Matchers {
     def createFakeProjectAndOpen(workspaceFile: File, projectName: String): WorkspaceManager[Project] = {
       WorkspaceTests.createFakeProject(workspaceFile, projectName)
       val manager = new WorkspaceManager[Project](workspaceFile.toString)
-      manager.openProject(
-        projectName,
-        { _: String =>
-          Some(Cpg.emptyCpg)
-        }
-      )
+      manager.openProject(projectName, (_: String) => Some(Cpg.empty))
       manager
     }
 

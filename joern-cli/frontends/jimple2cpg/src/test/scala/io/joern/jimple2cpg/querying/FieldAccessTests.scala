@@ -1,9 +1,9 @@
 package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class FieldAccessTests extends JimpleCode2CpgFixture {
 
@@ -51,7 +51,7 @@ class FieldAccessTests extends JimpleCode2CpgFixture {
     assign.code shouldBe "x = Foo.MAX_VALUE"
     val List(access: Call) = cpg.method(".*foo.*").call(".*fieldAccess").l
     access.code shouldBe "Foo.MAX_VALUE"
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.code shouldBe "Foo"
     identifier.name shouldBe "Foo"
     identifier.typeFullName shouldBe "Foo"
@@ -63,7 +63,7 @@ class FieldAccessTests extends JimpleCode2CpgFixture {
     val List(_: Call, _: Call, assign: Call) = cpg.method(".*bar.*").call(".*assignment").l
     assign.code shouldBe "y = f.value"
     val List(access: Call)                                             = cpg.method(".*bar.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.name shouldBe "f"
     identifier.typeFullName shouldBe "Foo"
     fieldIdentifier.canonicalName shouldBe "value"
@@ -73,7 +73,7 @@ class FieldAccessTests extends JimpleCode2CpgFixture {
     val List(_: Call, _: Call, assign: Call) = cpg.method(".*baz.*").call(".*assignment").l
     assign.code shouldBe "g.value = 66"
     val List(access: Call)                                             = cpg.method(".*baz.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.name shouldBe "g"
     identifier.typeFullName shouldBe "Foo"
     fieldIdentifier.canonicalName shouldBe "value"

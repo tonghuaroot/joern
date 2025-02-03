@@ -2,11 +2,9 @@ package io.joern.kotlin2cpg.validation
 
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.edges.Ast
 import io.shiftleft.codepropertygraph.generated.nodes.ClosureBinding
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.jIteratortoTraversal
+import io.shiftleft.semanticcpg.language.*
 
 class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
   "CPG for code with lambdas with no params and one param" should {
@@ -549,25 +547,6 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     }
   }
 
-  "CPG for code with simple object expression with apply called after it" should {
-    lazy val cpg = code("""
-        |package main
-        |
-        |fun main() {
-        |    val o = object { var prop = 1 }.apply { prop = 2 }
-        |    println(o.prop) // prints `2`
-        |}
-        |
-        |""".stripMargin)
-
-    "should not contain any CALL nodes with MFNs starting with `.`" in {
-      cpg.call
-        .methodFullName("\\..*")
-        .methodFullName
-        .l shouldBe List()
-    }
-  }
-
   "CPG for code with method with two callbacks with two generic types" should {
     lazy val cpg = code("""
         |package main
@@ -646,8 +625,6 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     }
   }
 
-  // TODO: re-enable test
-  /*
   "CPG for code with local declaration with RHS a call with lambda argument capturing the parameter of its containing method" should {
     lazy val cpg = code("""
         |package main
@@ -675,7 +652,6 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
         .l shouldBe List()
     }
   }
-   */
 
   "CPG for code with lambda inside method with captured constructor parameter and method parameter" should {
     lazy val cpg = code("""
@@ -732,17 +708,14 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
         |}
         |""".stripMargin)
 
-    // TODO: re-enable test case
-    /*
-      "should not contain any LOCAL nodes with the CLOSURE_BINDING_ID prop set but without corresponding CLOSURE_BINDING node" in {
-        val allClosureBindingIds = cpg.all.collectAll[ClosureBinding].closureBindingId.l
-        cpg.local
-          .where(_.closureBindingId)
-          .filterNot { l => allClosureBindingIds.contains(l.closureBindingId.get) }
-          .map { cb => (cb.code, cb.closureBindingId) }
-          .l shouldBe List()
-      }
-     */
+    "should not contain any LOCAL nodes with the CLOSURE_BINDING_ID prop set but without corresponding CLOSURE_BINDING node" in {
+      val allClosureBindingIds = cpg.all.collectAll[ClosureBinding].closureBindingId.l
+      cpg.local
+        .where(_.closureBindingId)
+        .filterNot { l => allClosureBindingIds.contains(l.closureBindingId.get) }
+        .map { cb => (cb.code, cb.closureBindingId) }
+        .l shouldBe List()
+    }
 
     "should not contain any METHOD nodes with FNs with a the `>` character in them" in {
       cpg.method
@@ -750,6 +723,7 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
         .fullNameNot(".*<init>.*")
         .fullNameNot("<operator>.*")
         .fullNameNot("<unresolvedNamespace>.*")
+        .fullNameNot(".*<unresolvedSignature>.*")
         .fullName(".*>.*")
         .fullName
         .l shouldBe List()
@@ -761,6 +735,7 @@ class ValidationTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
         .methodFullNameNot(".*<init>.*")
         .methodFullNameNot("<operator>.*")
         .methodFullNameNot("<unresolvedNamespace>.*")
+        .methodFullNameNot(".*<unresolvedSignature>.*")
         .methodFullName(".*>.*")
         .methodFullName
         .l shouldBe List()

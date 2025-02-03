@@ -1,10 +1,10 @@
 package io.joern.scanners.ghidra
 
-import io.joern.scanners._
-import io.joern.console._
-import io.joern.macros.QueryMacros._
-import io.shiftleft.semanticcpg.language._
-import io.joern.dataflowengineoss.language._
+import io.joern.scanners.*
+import io.joern.console.*
+import io.joern.macros.QueryMacros.*
+import io.shiftleft.semanticcpg.language.*
+import io.joern.dataflowengineoss.language.*
 import io.joern.dataflowengineoss.queryengine.EngineContext
 
 object UserInputIntoDangerousFunctions extends QueryBundle {
@@ -25,7 +25,7 @@ object UserInputIntoDangerousFunctions extends QueryBundle {
         def source =
           cpg.call.methodFullName("getenv").cfgNext.isCall.argument(2)
         def sink = cpg.method.fullName("strcpy").parameter.index(2)
-        sink.reachableBy(source).l
+        sink.reachableBy(source)
       }),
       tags = List(QueryTags.badfn)
     )

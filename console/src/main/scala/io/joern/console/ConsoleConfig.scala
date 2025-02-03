@@ -1,6 +1,6 @@
 package io.joern.console
 
-import better.files._
+import better.files.*
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -61,10 +61,17 @@ class ConsoleConfig(
 ) {}
 
 object ToolsConfig {
+
+  private val osSpecificOpenCmd: String = {
+    if (scala.util.Properties.isWin) "start"
+    else if (scala.util.Properties.isMac) "open"
+    else "xdg-open"
+  }
+
   def apply(): ToolsConfig = new ToolsConfig()
 }
 
-class ToolsConfig(var imageViewer: String = "xdg-open")
+class ToolsConfig(var imageViewer: String = ToolsConfig.osSpecificOpenCmd)
 
 class FrontendConfig(var cmdLineParams: Iterable[String] = mutable.Buffer()) {
   def withArgs(args: Iterable[String]): FrontendConfig = {

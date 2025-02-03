@@ -1,47 +1,56 @@
 package io.joern.javasrc2cpg.typesolvers
 
 import com.github.javaparser.ast.body.TypeDeclaration
+import com.github.javaparser.resolution.TypeSolver
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration
+import com.github.javaparser.resolution.model.SymbolReference
+import com.github.javaparser.symbolsolver.JavaSymbolSolver
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade
-import com.github.javaparser.symbolsolver.model.resolution.{SymbolReference, TypeSolver}
-import io.joern.javasrc2cpg.JpAstWithMeta
+import io.joern.javasrc2cpg.util.SourceParser
 import org.slf4j.LoggerFactory
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.RichOptional
 import scala.util.Try
 
-class EagerSourceTypeSolver(asts: List[JpAstWithMeta], combinedTypeSolver: SimpleCombinedTypeSolver)
-    extends TypeSolver {
+class EagerSourceTypeSolver(
+  sourceParser: SourceParser,
+  combinedTypeSolver: SimpleCombinedTypeSolver,
+  symbolSolver: JavaSymbolSolver
+) extends TypeSolver {
 
   private val logger             = LoggerFactory.getLogger(this.getClass)
-  private var parent: TypeSolver = _
+  private var parent: TypeSolver = scala.compiletime.uninitialized
 
   private val foundTypes: Map[String, SymbolReference[ResolvedReferenceTypeDeclaration]] = {
-    val ret = asts
-      .map(_.compilationUnit)
+    sourceParser.relativeFilenames
+      .flatMap(sourceParser.parseTypesFile)
       .flatMap { cu =>
-        cu.findAll(classOf[TypeDeclaration[_]])
+        symbolSolver.inject(cu)
+        cu.findAll(classOf[TypeDeclaration[?]])
           .asScala
           .map { typeDeclaration =>
             val name = typeDeclaration.getFullyQualifiedName.toScala match {
               case Some(fullyQualifiedName) => fullyQualifiedName
               case None =>
                 val name = typeDeclaration.getNameAsString
-                logger.error(s"Could not find fully qualified name for typeDecl $name")
+                // Local classes aren't expected to have a fully qualified name
+                if (typeDeclaration.isTopLevelType() || typeDeclaration.isNestedType()) {
+                  logger.warn(s"Could not find fully qualified name for typeDecl $name")
+                }
                 name
             }
+            TypeSizeReducer.simplifyType(typeDeclaration)
             val resolvedSymbol = Try(
               SymbolReference.solved(
                 JavaParserFacade.get(combinedTypeSolver).getTypeDeclaration(typeDeclaration)
               ): SymbolReference[ResolvedReferenceTypeDeclaration]
-            ).getOrElse(SymbolReference.unsolved(classOf[ResolvedReferenceTypeDeclaration]))
+            ).getOrElse(SymbolReference.unsolved())
             name -> resolvedSymbol
           }
           .toList
       }
       .toMap
-    ret
   }
 
   override def getParent: TypeSolver = parent
@@ -59,12 +68,16 @@ class EagerSourceTypeSolver(asts: List[JpAstWithMeta], combinedTypeSolver: Simpl
   }
 
   override def tryToSolveType(name: String): SymbolReference[ResolvedReferenceTypeDeclaration] = {
-    foundTypes.getOrElse(name, SymbolReference.unsolved(classOf[ResolvedReferenceTypeDeclaration]))
+    foundTypes.getOrElse(name, SymbolReference.unsolved())
   }
 }
 
 object EagerSourceTypeSolver {
-  def apply(asts: List[JpAstWithMeta], combinedTypeSolver: SimpleCombinedTypeSolver): EagerSourceTypeSolver = {
-    new EagerSourceTypeSolver(asts, combinedTypeSolver)
+  def apply(
+    sourceParser: SourceParser,
+    combinedTypeSolver: SimpleCombinedTypeSolver,
+    symbolSolver: JavaSymbolSolver
+  ): EagerSourceTypeSolver = {
+    new EagerSourceTypeSolver(sourceParser, combinedTypeSolver, symbolSolver)
   }
 }

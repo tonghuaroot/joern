@@ -1,9 +1,9 @@
 package io.joern.jssrc2cpg.passes
 
 import better.files.File
-import io.joern.jssrc2cpg.utils.Report
 import io.joern.jssrc2cpg.Config
-import io.shiftleft.codepropertygraph.Cpg
+import io.joern.x2cpg.utils.Report
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.utils.IOUtils
 
 import scala.util.matching.Regex

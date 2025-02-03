@@ -1,10 +1,10 @@
 package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Identifier, TypeRef}
 import io.shiftleft.proto.cpg.Cpg.DispatchTypes
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class SpecialOperatorTests extends JimpleCode2CpgFixture {
 
@@ -31,7 +31,7 @@ class SpecialOperatorTests extends JimpleCode2CpgFixture {
     call.argumentIndex shouldBe 2
     call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
 
-    val List(o: Identifier, t: TypeRef) = call.argument.l
+    val List(o: Identifier, t: TypeRef) = call.argument.l: @unchecked
     o.code shouldBe "o"
     o.order shouldBe 1
     o.argumentIndex shouldBe 1
@@ -55,7 +55,7 @@ class SpecialOperatorTests extends JimpleCode2CpgFixture {
     call.argumentIndex shouldBe 2
     call.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH.toString
 
-    val List(t: TypeRef, i: Identifier) = call.argument.l
+    val List(t: TypeRef, i: Identifier) = call.argument.l: @unchecked
 
     t.order shouldBe 1
     t.argumentIndex shouldBe 1

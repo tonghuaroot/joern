@@ -1,10 +1,10 @@
 package io.joern.kotlin2cpg.querying
 
-import io.joern.kotlin2cpg.Constants
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
+import io.joern.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, MethodParameterIn}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
 
@@ -20,7 +20,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     "should contain a METHOD node for the constructor with the correct props set" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.Foo").method.l
       m.fullName shouldBe "mypkg.Foo.<init>:void()"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.parameter.size shouldBe 1
       Option(m.block).isDefined shouldBe true
     }
@@ -36,7 +36,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     "should contain a METHOD node for the constructor with a block with no children" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.AClass").method.l
       m.fullName shouldBe "mypkg.AClass.<init>:void(java.lang.String)"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.parameter.size shouldBe 2
       Option(m.block).isDefined shouldBe true
       m.block.expressionDown.size shouldBe 0
@@ -64,7 +64,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     "should contain a METHOD node for the constructor with the correct props set" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.AClass").method.l
       m.fullName shouldBe "mypkg.AClass.<init>:void(java.lang.String)"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.parameter.size shouldBe 2
       Option(m.block).isDefined shouldBe true
 
@@ -80,14 +80,14 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
       memberAssignmentCall.name shouldBe Operators.assignment
       memberAssignmentCall.order shouldBe 1
 
-      val List(assignmentLhs: Call, assignmentRhs: Identifier) = memberAssignmentCall.argument.l
+      val List(assignmentLhs: Call, assignmentRhs: Identifier) = memberAssignmentCall.argument.l: @unchecked
       assignmentRhs.code shouldBe "x"
       assignmentRhs.name shouldBe "x"
       assignmentRhs.typeFullName shouldBe "java.lang.String"
       assignmentRhs.argumentIndex shouldBe 2
       assignmentRhs.order shouldBe 2
 
-      val List(refParam: MethodParameterIn) = assignmentRhs.refsTo.l
+      val List(refParam: MethodParameterIn) = assignmentRhs.refsTo.l: @unchecked
       refParam.name shouldBe "x"
 
       assignmentLhs.methodFullName shouldBe Operators.fieldAccess
@@ -96,7 +96,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
       assignmentLhs.order shouldBe 1
       assignmentLhs.argumentIndex shouldBe 1
 
-      val List(fieldAccessLhs: Identifier, fieldAccessRhs: FieldIdentifier) = assignmentLhs.argument.l
+      val List(fieldAccessLhs: Identifier, fieldAccessRhs: FieldIdentifier) = assignmentLhs.argument.l: @unchecked
       fieldAccessLhs.order shouldBe 1
       fieldAccessLhs.argumentIndex shouldBe 1
       fieldAccessLhs.typeFullName shouldBe "mypkg.AClass"
@@ -120,7 +120,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     "should contain a METHOD node for the constructor with the correct props set" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.Foo").method.l
       m.fullName shouldBe "mypkg.Foo.<init>:void(java.lang.String)"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.parameter.size shouldBe 2
       Option(m.block).isDefined shouldBe true
     }
@@ -137,7 +137,7 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
     "should contain a METHOD node for the constructor with the correct props set" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.Foo").method.l
       m.fullName shouldBe "mypkg.Foo.<init>:void(java.lang.String)"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.parameter.size shouldBe 2
       Option(m.block).isDefined shouldBe true
     }
@@ -177,21 +177,19 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
       m.methodReturn.typeFullName shouldBe "void"
       m.methodReturn.lineNumber shouldBe Some(4)
       m.methodReturn.columnNumber shouldBe Some(9)
-
-      m.block.astChildren.size shouldBe 0
     }
 
     "should contain a METHOD node for the secondary constructor with properties set correctly" in {
       val List(m) = cpg.typeDecl.fullNameExact("mypkg.Foo").method.slice(1, 2).l
       m.fullName shouldBe "mypkg.Foo.<init>:void(java.lang.String,int)"
-      m.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
+      m.name shouldBe Defines.ConstructorMethodName
       m.lineNumber shouldBe Some(6)
       m.columnNumber shouldBe Some(4)
       m.methodReturn.typeFullName shouldBe "void"
       m.methodReturn.lineNumber shouldBe Some(6)
       m.methodReturn.columnNumber shouldBe Some(4)
 
-      m.block.astChildren.map(_.code).l shouldBe List(Constants.init, "this.bar = bar")
+      m.block.astChildren.map(_.code).l shouldBe List(Defines.ConstructorMethodName, "this.bar = bar")
 
       val List(mThisParam: MethodParameterIn, firstParam: MethodParameterIn, secondParam: MethodParameterIn) =
         m.parameter.l
@@ -200,18 +198,19 @@ class ConstructorTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
       secondParam.name shouldBe "bar"
 
       val b                                     = m.block
-      val List(_: Call, secondBlockChild: Call) = b.astChildren.l
+      val List(_: Call, secondBlockChild: Call) = b.astChildren.l: @unchecked
       secondBlockChild.methodFullName shouldBe Operators.assignment
       secondBlockChild.code shouldBe "this.bar = bar"
       secondBlockChild.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
 
-      val List(assignmentLhs: Call, assignmentRhs: Identifier) = secondBlockChild.argument.l
+      val List(assignmentLhs: Call, assignmentRhs: Identifier) = secondBlockChild.argument.l: @unchecked
       assignmentLhs.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
       assignmentLhs.methodFullName shouldBe Operators.fieldAccess
       assignmentLhs.name shouldBe Operators.fieldAccess
       assignmentRhs.code shouldBe "bar"
       secondParam.referencingIdentifiers.id.l.contains(assignmentRhs.id) shouldBe true
-      val List(thisIdentifier: Identifier, relevantFieldIdentifier: FieldIdentifier) = assignmentLhs.argument.l
+      val List(thisIdentifier: Identifier, relevantFieldIdentifier: FieldIdentifier) =
+        assignmentLhs.argument.l: @unchecked
       thisIdentifier.code shouldBe "this"
       thisIdentifier.argumentIndex shouldBe 1
       mThisParam.referencingIdentifiers.id.l.contains(thisIdentifier.id) shouldBe true

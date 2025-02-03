@@ -2,8 +2,8 @@ package io.joern.dataflowengineoss.queryengine
 
 import io.joern.dataflowengineoss.queryengine.QueryEngineStatistics.{PATH_CACHE_HITS, PATH_CACHE_MISSES}
 import io.joern.dataflowengineoss.semanticsloader.Semantics
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.language.{toCfgNodeMethods, toExpressionMethods}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 
 import java.util.concurrent.Callable
 import scala.collection.mutable
@@ -189,6 +189,8 @@ class TaskSolver(task: ReachableByTask, context: EngineContext, sources: Set[Cfg
             && arg.inCall.toList.exists(c => isCallToInternalMethodWithoutSemantic(c))
             && !arg.inCall.headOption.exists(x => isArgOrRetOfMethodWeCameFrom(x, path)) =>
         createPartialResultForOutputArgOrRet()
+
+      case _: MethodRef => createPartialResultForOutputArgOrRet()
 
       // All other cases: expand into parents
       case _ =>

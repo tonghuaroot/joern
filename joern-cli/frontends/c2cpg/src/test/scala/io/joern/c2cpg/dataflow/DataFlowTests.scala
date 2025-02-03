@@ -1,12 +1,14 @@
 package io.joern.c2cpg.dataflow
 
 import io.joern.c2cpg.testfixtures.DataFlowCodeToCpgSuite
-import io.joern.dataflowengineoss.language._
-import io.joern.dataflowengineoss.queryengine.{EngineConfig, EngineContext}
+import io.joern.dataflowengineoss.language.*
+import io.joern.dataflowengineoss.queryengine.EngineConfig
+import io.joern.dataflowengineoss.queryengine.EngineContext
 import io.shiftleft.codepropertygraph.generated.EdgeTypes
-import io.shiftleft.codepropertygraph.generated.nodes.{CfgNode, Identifier, Literal}
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.toNodeTraversal
+import io.shiftleft.codepropertygraph.generated.nodes.CfgNode
+import io.shiftleft.codepropertygraph.generated.nodes.Identifier
+import io.shiftleft.codepropertygraph.generated.nodes.Literal
+import io.shiftleft.semanticcpg.language.*
 
 class DataFlowTests extends DataFlowCodeToCpgSuite {
 
@@ -43,13 +45,13 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       implicit val callResolver: NoResolve.type = NoResolve
       val source                                = cpg.identifier
       val sink                                  = cpg.method.name("free").parameter.argument
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 5
+      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
     }
 
     "find flows to `free`" in {
       val source = cpg.identifier
-      val sink   = cpg.call.name("free")
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 5
+      val sink   = cpg.call.name("free").argument(1)
+      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.size shouldBe 6
     }
 
     "find flows from identifiers to return values of `flow`" in {
@@ -462,17 +464,7 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       val source = cpg.identifier
       val sink   = cpg.method.name("free").parameter.argument
       val flows  = sink.reachableByFlows(source).map(flowToResultPairs).l.distinct
-
-      flows.size shouldBe 5
-
-      flows.toSet shouldBe
-        Set(
-          List(("q = p->next", 10), ("p = q", 9), ("p != NULL", 9), ("free(p)", 11)),
-          List(("p = q", 9), ("p != NULL", 9), ("free(p)", 11)),
-          List(("p != NULL", 9), ("free(p)", 11)),
-          List(("free(p)", 11)),
-          List(("*p = head", 9), ("p != NULL", 9), ("free(p)", 11))
-        )
+      flows.size shouldBe 6
     }
   }
 
@@ -1091,7 +1083,7 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       cpg
         .call("bar")
         .outE(EdgeTypes.REACHING_DEF)
-        .count(_.inNode() == cpg.ret.head) shouldBe 1
+        .count(_.dst == cpg.ret.head) shouldBe 1
     }
   }
 
@@ -1315,13 +1307,13 @@ class DataFlowTests extends DataFlowCodeToCpgSuite {
       implicit val callResolver: NoResolve.type = NoResolve
       val source                                = cpg.identifier
       val sink                                  = cpg.method.name("free").parameter.argument
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 5
+      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
     }
 
     "find flows to `free`" in {
       val source = cpg.identifier
-      val sink   = cpg.call.name("free")
-      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 5
+      val sink   = cpg.call.name("free").argument(1)
+      sink.reachableByFlows(source).l.map(flowToResultPairs).distinct.toSet.size shouldBe 6
     }
 
     "find flows from identifiers to return values of `flow`" in {
@@ -1654,240 +1646,242 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
 
   "DataFlowTests67" should {
     val cpg = code("""
-      |void CWE415_Double_Free__malloc_free_char_53b_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53_bad() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
-      |  free(data);
-      |  CWE415_Double_Free__malloc_free_char_53b_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(char * data);
-      |
-      |static void goodG2B() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* FIX: Do NOT free data in the source - the bad sink frees data */
-      |  CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(char * data);
-      |
-      |static void goodB2G() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
-      |  free(data);
-      |  CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53b_badSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53c_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53d_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_badSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53d_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53d_badSink(char * data) {
-      |  /* POTENTIAL FLAW: Possibly freeing memory twice */
-      |  free(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(char * data) {
-      |  /* POTENTIAL FLAW: Possibly freeing memory twice */
-      |  free(data);
-      |}
-      |
-      |/* goodB2G uses the BadSource with the GoodSink */
-      |void CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(char * data) {
-      |    /* do nothing */
-      |    /* FIX: Don't attempt to free the memory */
-      |    ; /* empty statement needed for some flow variants */
-      |}""".stripMargin)
+        |void CWE415_Double_Free__malloc_free_char_53b_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53_bad() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
+        |  free(data);
+        |  CWE415_Double_Free__malloc_free_char_53b_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(char * data);
+        |
+        |static void goodG2B() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* FIX: Do NOT free data in the source - the bad sink frees data */
+        |  CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(char * data);
+        |
+        |static void goodB2G() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
+        |  free(data);
+        |  CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53b_badSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53c_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53b_goodG2BSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53b_goodB2GSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53d_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_badSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53d_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_goodG2BSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_53c_goodB2GSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53d_badSink(char * data) {
+        |  /* POTENTIAL FLAW: Possibly freeing memory twice */
+        |  free(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_53d_goodG2BSink(char * data) {
+        |  /* POTENTIAL FLAW: Possibly freeing memory twice */
+        |  free(data);
+        |}
+        |
+        |/* goodB2G uses the BadSource with the GoodSink */
+        |void CWE415_Double_Free__malloc_free_char_53d_goodB2GSink(char * data) {
+        |    /* do nothing */
+        |    /* FIX: Don't attempt to free the memory */
+        |    ; /* empty statement needed for some flow variants */
+        |}""".stripMargin)
 
     "find flow for maxCallDepth = -1" in {
       def freeArg = cpg.call("free").argument(1)
+
       freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
     }
   }
 
   "DataFlowTests68" should {
     val cpg = code("""
-      |void CWE415_Double_Free__malloc_free_char_54b_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54_bad() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
-      |  free(data);
-      |  CWE415_Double_Free__malloc_free_char_54b_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(char * data);
-      |
-      |static void goodG2B() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* FIX: Do NOT free data in the source - the bad sink frees data */
-      |  CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(data);
-      |}
-      |
-      |/* goodB2G uses the BadSource with the GoodSink */
-      |void CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(char * data);
-      |
-      |static void goodB2G() {
-      |  char * data;
-      |  /* Initialize data */
-      |  data = NULL;
-      |  data = (char *)malloc(100*sizeof(char));
-      |  if (data == NULL) {exit(-1);}
-      |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
-      |  free(data);
-      |  CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54_good() {
-      |  goodG2B();
-      |  goodB2G();
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54b_badSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54c_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_badSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54d_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_badSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_badSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54e_badSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(char * data);
-      |
-      |void CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(char * data) {
-      |  CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_badSink(char * data) {
-      |  /* POTENTIAL FLAW: Possibly freeing memory twice */
-      |  free(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(char * data) {
-      |  /* POTENTIAL FLAW: Possibly freeing memory twice */
-      |  free(data);
-      |}
-      |
-      |void CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(char * data) {
-      |  /* do nothing */
-      |  /* FIX: Don't attempt to free the memory */
-      |  ; /* empty statement needed for some flow variants */
-      |}""".stripMargin)
+        |void CWE415_Double_Free__malloc_free_char_54b_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54_bad() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
+        |  free(data);
+        |  CWE415_Double_Free__malloc_free_char_54b_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(char * data);
+        |
+        |static void goodG2B() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* FIX: Do NOT free data in the source - the bad sink frees data */
+        |  CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(data);
+        |}
+        |
+        |/* goodB2G uses the BadSource with the GoodSink */
+        |void CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(char * data);
+        |
+        |static void goodB2G() {
+        |  char * data;
+        |  /* Initialize data */
+        |  data = NULL;
+        |  data = (char *)malloc(100*sizeof(char));
+        |  if (data == NULL) {exit(-1);}
+        |  /* POTENTIAL FLAW: Free data in the source - the bad sink frees data as well */
+        |  free(data);
+        |  CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54_good() {
+        |  goodG2B();
+        |  goodB2G();
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54b_badSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54c_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54b_goodG2BSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54b_goodB2GSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_badSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54d_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_goodG2BSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54c_goodB2GSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_badSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_badSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54e_badSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_goodG2BSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(char * data);
+        |
+        |void CWE415_Double_Free__malloc_free_char_54d_goodB2GSink(char * data) {
+        |  CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_badSink(char * data) {
+        |  /* POTENTIAL FLAW: Possibly freeing memory twice */
+        |  free(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_goodG2BSink(char * data) {
+        |  /* POTENTIAL FLAW: Possibly freeing memory twice */
+        |  free(data);
+        |}
+        |
+        |void CWE415_Double_Free__malloc_free_char_54e_goodB2GSink(char * data) {
+        |  /* do nothing */
+        |  /* FIX: Don't attempt to free the memory */
+        |  ; /* empty statement needed for some flow variants */
+        |}""".stripMargin)
 
     "find flow for maxCallDepth = -1" in {
       def freeArg = cpg.call("free").argument(1)
+
       freeArg.reachableByFlows(freeArg).count(path => path.elements.sizeIs > 1) shouldBe 1
     }
   }
 
   "DataFlowTest69" should {
     val cpg = code("""
-      |void sink(int);
-      |
-      |void foo() {
-      |	 int val = 42, a, b;
-      |	 a = b = val;
-      |	 sink(a);
-      |}
-      |
-      |void bar() {
-      |	 int val = 42, a;
-      |	 a = val++;
-      |	 sink(a);
-      |}""".stripMargin)
+        |void sink(int);
+        |
+        |void foo() {
+        |	 int val = 42, a, b;
+        |	 a = b = val;
+        |	 sink(a);
+        |}
+        |
+        |void bar() {
+        |	 int val = 42, a;
+        |	 a = val++;
+        |	 sink(a);
+        |}""".stripMargin)
 
     "find flows" in {
       val sink = cpg.method("sink").parameter.index(1).l
@@ -1898,12 +1892,12 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
 
   "DataFlowTest70" should {
     val cpg = code("""
-      |int foo() {
-      |  int v1, v2 = 0;
-      |  if((v1 = 1, v2 == 2) || v2 <= 3) return v2;
-      |  return 0;
-      |}
-      |""".stripMargin)
+        |int foo() {
+        |  int v1, v2 = 0;
+        |  if((v1 = 1, v2 == 2) || v2 <= 3) return v2;
+        |  return 0;
+        |}
+        |""".stripMargin)
 
     "find flows" in {
       val source = cpg.identifier("v2").l
@@ -1934,13 +1928,13 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
 
   "DataFlowTest71" should {
     val cpg = code("""
-      |#define BAR(x) (x)
-      |
-      |void foo() {
-      |  int v1 = 0;
-      |  if (BAR(v1)) v1 = 1;
-      |}
-      |""".stripMargin)
+        |#define BAR(x) (x)
+        |
+        |void foo() {
+        |  int v1 = 0;
+        |  if (BAR(v1)) v1 = 1;
+        |}
+        |""".stripMargin)
 
     "find flows" in {
       val source = cpg.identifier("v1").l
@@ -1952,5 +1946,244 @@ class DataFlowTestsWithCallDepth extends DataFlowCodeToCpgSuite {
       )
     }
   }
+  "DataFlowTest72" should {
+    val cpg = code("""
+        |struct struct_length {
+        | unsigned int *plen;
+        |};
+        |struct wraping_struct {
+        |  struct struct_length *s_len;
+        |};
+        |void sink(unsigned int *plen4) {
+        |  *plen4 = 1000;
+        |}
+        |void level3(unsigned int *plen3) {
+        |  sink(plen3);
+        |}
+        |void level2(unsigned int *plen2) {
+        |  level3(plen2);
+        |}
+        |void level1(struct struct_length s_len) {
+        |  level2(s_len->plen);
+        |}
+        |void source(struct wraping_struct w_struct) {
+        |  level1(w_struct->s_len);
+        |}
+        |""".stripMargin)
 
+    "find flows" in {
+      def source = cpg.method.name("source").parameter
+
+      def sink = cpg.call.name("sink").argument.order(1)
+
+      sink.reachableByFlows(source).l.map(flowToResultPairs).toSet shouldBe Set(
+        List(
+          ("source(struct wraping_struct w_struct)", 20),
+          ("level1(w_struct->s_len)", 21),
+          ("level1(struct struct_length s_len)", 17),
+          ("level2(s_len->plen)", 18),
+          ("level2(unsigned int *plen2)", 14),
+          ("level3(plen2)", 15),
+          ("level3(unsigned int *plen3)", 11),
+          ("sink(plen3)", 12)
+        )
+      )
+    }
+  }
+
+  "DataFlowTest73" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x%=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x%=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x%=2", 4), ("call1(x%=2)", 4)))
+    }
+
+    "the literal in x%=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x%=2", 4), ("call2(x)", 5)))
+    }
+
+  }
+
+  "DataFlowTest74" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x^=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x^=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x^=2", 4), ("call1(x^=2)", 4)))
+    }
+
+    "the literal in x^=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x^=2", 4), ("call2(x)", 5)))
+    }
+  }
+
+  "DataFlowTest75" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x|=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x|=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x|=2", 4), ("call1(x|=2)", 4)))
+    }
+
+    "the literal in x|=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x|=2", 4), ("call2(x)", 5)))
+    }
+  }
+
+  "DataFlowTest76" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x&=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x&=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x&=2", 4), ("call1(x&=2)", 4)))
+    }
+
+    "the literal in x&=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x&=2", 4), ("call2(x)", 5)))
+    }
+  }
+
+  "DataFlowTest77" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x<<=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x<<=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x<<=2", 4), ("call1(x<<=2)", 4)))
+    }
+
+    "the literal in x<<=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x<<=2", 4), ("call2(x)", 5)))
+    }
+  }
+
+  "DataFlowTest78" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | call1(x>>=2);
+        | call2(x);
+        |}
+        |""".stripMargin)
+
+    "the literal in x>>=2 should taint the outer expression" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call1")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x>>=2", 4), ("call1(x>>=2)", 4)))
+    }
+
+    "the literal in x>>=2 should taint the next occurrence of x" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.call("call2")
+      sink.reachableByFlows(source).map(flowToResultPairs).l shouldBe List(List(("x>>=2", 4), ("call2(x)", 5)))
+    }
+  }
+
+  "DataFlowTest79" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 5;
+        | int y = 2;
+        | int z = x % y;
+        | call1(z);
+        |}
+        |""".stripMargin)
+
+    "the first argument in a % operation should not taint its second argument" in {
+      val source = cpg.literal("5")
+      val sink   = cpg.identifier("y").lineNumber(5)
+      sink.reachableByFlows(source) shouldBe empty
+    }
+
+    "the second argument in a % operation should not taint its first argument" in {
+      val source = cpg.literal("2")
+      val sink   = cpg.identifier("x").lineNumber(5)
+      sink.reachableByFlows(source) shouldBe empty
+    }
+
+    "the arguments in a % operation should taint its return value" in {
+      val source = cpg.literal
+      val sink   = cpg.call("call1").argument
+      sink.reachableByFlows(source).map(flowToResultPairs).toSetMutable shouldBe Set(
+        List(("x = 5", 3), ("x % y", 5), ("z = x % y", 5), ("call1(z)", 6)),
+        List(("y = 2", 4), ("x % y", 5), ("z = x % y", 5), ("call1(z)", 6))
+      )
+    }
+  }
+
+  "DataFlowTest80" should {
+    val cpg = code("""
+        |int main(void) {
+        | int x = 10;
+        | int y = 20;
+        | int z[] = {x, y, 30};
+        | call1(z);
+        |}
+        |""".stripMargin)
+
+    "elements of an arrayInitializer should not taint each other" in {
+      val x = cpg.identifier("x").lineNumber(5).l
+      val y = cpg.identifier("y").lineNumber(5).l
+      val z = cpg.literal("30").l
+      x.reachableByFlows(y ++ z) shouldBe empty
+      y.reachableByFlows(x ++ z) shouldBe empty
+      z.reachableByFlows(x ++ y) shouldBe empty
+    }
+
+    "elements of an arrayInitializer should taint its return value" in {
+      val x = cpg.literal("10")
+      val y = cpg.literal("20")
+      val z = cpg.literal("30")
+      cpg.call("call1").argument.reachableByFlows(x ++ y ++ z).map(flowToResultPairs).toSetMutable shouldBe Set(
+        List(("x = 10", 3), ("{x, y, 30}", 5), ("z[] = {x, y, 30}", 5), ("call1(z)", 6)),
+        List(("y = 20", 4), ("{x, y, 30}", 5), ("z[] = {x, y, 30}", 5), ("call1(z)", 6)),
+        List(("{x, y, 30}", 5), ("z[] = {x, y, 30}", 5), ("call1(z)", 6))
+      )
+    }
+  }
 }

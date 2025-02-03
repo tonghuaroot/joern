@@ -1,21 +1,22 @@
 package io.joern.ghidra2cpg.passes
 
+import ghidra.app.util.template.TemplateSimplifier
 import ghidra.program.model.address.GenericAddress
 import ghidra.program.model.lang.Register
 import ghidra.program.model.listing.{CodeUnitFormat, CodeUnitFormatOptions, Function, Instruction, Program}
-import ghidra.program.model.pcode.HighFunction
+import ghidra.program.model.pcode.{HighFunction, HighSymbol}
 import ghidra.program.model.scalar.Scalar
-import io.joern.ghidra2cpg._
-import io.joern.ghidra2cpg.processors._
+import io.joern.ghidra2cpg.*
+import io.joern.ghidra2cpg.processors.*
 import io.joern.ghidra2cpg.utils.Decompiler
-import io.joern.ghidra2cpg.utils.Utils._
-import io.shiftleft.codepropertygraph.Cpg
+import io.joern.ghidra2cpg.utils.Utils.*
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{CfgNodeNew, NewBlock, NewMethod}
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, nodes}
-import io.shiftleft.passes.ConcurrentWriterCpgPass
+import io.shiftleft.passes.ForkJoinParallelCpgPass
 
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.language.implicitConversions
 
 abstract class FunctionPass(
@@ -24,7 +25,7 @@ abstract class FunctionPass(
   functions: List[Function],
   cpg: Cpg,
   decompiler: Decompiler
-) extends ConcurrentWriterCpgPass[Function](cpg) {
+) extends ForkJoinParallelCpgPass[Function](cpg) {
 
   protected val functionByName: mutable.Map[String, Function] = mutable.HashMap[String, Function]()
   for (fn <- functions) {
@@ -34,7 +35,9 @@ abstract class FunctionPass(
     }
   }
 
-  def getHighFunction(function: Function): HighFunction = decompiler.toHighFunction(function).orNull
+  def getHighFunction(function: Function): Option[HighFunction] =
+    decompiler.toHighFunction(function)
+
   protected def getInstructions(function: Function): Seq[Instruction] =
     currentProgram.getListing.getInstructions(function.getBody, true).iterator().asScala.toList
 
@@ -50,13 +53,14 @@ abstract class FunctionPass(
       true,
       true,
       true,
-      true
+      true,
+      new TemplateSimplifier()
     )
   )
 
   override def generateParts(): Array[Function] = functions.toArray
 
-  implicit def intToIntegerOption(intOption: Option[Int]): Option[Integer] = intOption.map(intValue => {
+  implicit def intToIntegerOption(intOption: Option[Int]): Option[Int] = intOption.map(intValue => {
     val integerValue = intValue
     integerValue
   })
@@ -78,25 +82,28 @@ abstract class FunctionPass(
           diffGraphBuilder.addNode(node)
           diffGraphBuilder.addEdge(methodNode, node, EdgeTypes.AST)
         }
-    else
-      getHighFunction(function).getLocalSymbolMap.getSymbols.asScala.toSeq
-        .filter(_.isParameter)
-        .foreach { parameter =>
-          val checkedParameter = Option(parameter.getStorage)
-            .flatMap(x => Option(x.getRegister))
-            .flatMap(x => Option(x.getName))
-            .getOrElse(parameter.getName)
-          val node =
-            createParameterNode(
-              checkedParameter,
-              checkedParameter,
-              parameter.getCategoryIndex + 1,
-              parameter.getDataType.getName,
-              function.getEntryPoint.getOffsetAsBigInteger.intValue()
-            )
-          diffGraphBuilder.addNode(node)
-          diffGraphBuilder.addEdge(methodNode, node, EdgeTypes.AST)
-        }
+    else {
+      getHighFunction(function).foreach { highFunction =>
+        highFunction.getLocalSymbolMap.getSymbols.asScala.toSeq
+          .filter(_.isParameter)
+          .foreach { parameter =>
+            val checkedParameter = Option(parameter.getStorage)
+              .flatMap(x => Option(x.getRegister))
+              .flatMap(x => Option(x.getName))
+              .getOrElse(parameter.getName)
+            val node =
+              createParameterNode(
+                checkedParameter,
+                checkedParameter,
+                parameter.getCategoryIndex + 1,
+                parameter.getDataType.getName,
+                function.getEntryPoint.getOffsetAsBigInteger.intValue()
+              )
+            diffGraphBuilder.addNode(node)
+            diffGraphBuilder.addEdge(methodNode, node, EdgeTypes.AST)
+          }
+      }
+    }
   }
 
   def handleLocals(diffGraphBuilder: DiffGraphBuilder, function: Function, blockNode: NewBlock): Unit = {
@@ -149,16 +156,14 @@ abstract class FunctionPass(
   ): Unit = {
     val mnemonicString = processor.getInstructions.getOrElse(instruction.getMnemonicString, "UNKNOWN")
     if (mnemonicString.equals("CALL")) {
-      val calledFunction =
-        codeUnitFormat.getOperandRepresentationString(instruction, 0)
-      val callee = functionByName.get(calledFunction)
-      if (callee.nonEmpty) {
+      val calledFunction = codeUnitFormat.getOperandRepresentationString(instruction, 0)
+      functionByName.get(calledFunction).map { callee =>
         // Array of tuples containing (checked parameter name, parameter index, parameter data type)
         var checkedParameters = Array.empty[(String, Int, String)]
 
-        if (callee.head.isThunk) {
+        if (callee.isThunk) {
           // thunk functions contain parameters already
-          val parameters = callee.head.getParameters
+          val parameters = callee.getParameters
           // TODO:
           checkedParameters = parameters.map { parameter =>
             val checkedParameter =
@@ -174,14 +179,12 @@ abstract class FunctionPass(
           // decompilation for a function is cached so subsequent calls to decompile should be free
           // TODO: replace this later on
           val parameters = decompiler
-            .toHighFunction(callee.head)
-            .get
-            .getLocalSymbolMap
-            .getSymbols
-            .asScala
-            .toSeq
-            .filter(_.isParameter)
-            .toArray
+            .toHighFunction(callee)
+            .map { highFunction =>
+              highFunction.getLocalSymbolMap.getSymbols.asScala.toSeq.filter(_.isParameter).toArray
+            }
+            .getOrElse(Array.empty[HighSymbol])
+
           checkedParameters = parameters.map { parameter =>
             val checkedParameter =
               if (parameter.getStorage.getRegister == null) parameter.getName

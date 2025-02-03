@@ -1,9 +1,9 @@
 package io.shiftleft.semanticcpg.dotgenerator
 
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Method, StoredNode}
 import io.shiftleft.semanticcpg.dotgenerator.DotSerializer.{Edge, Graph}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
 
@@ -11,7 +11,7 @@ class CallGraphGenerator {
 
   def generate(cpg: Cpg): Graph = {
     val subgraph = mutable.HashMap.empty[String, Seq[StoredNode]]
-    val vertices = cpg.all.collect { case m: Method => m }.l
+    val vertices = cpg.method.l
     val edges = for {
       srcMethod <- vertices
       _ = storeInSubgraph(srcMethod, subgraph)

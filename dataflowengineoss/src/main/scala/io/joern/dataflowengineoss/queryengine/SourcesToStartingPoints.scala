@@ -1,69 +1,183 @@
 package io.joern.dataflowengineoss.queryengine
 
+import io.joern.dataflowengineoss.globalFromLiteral
 import io.joern.x2cpg.Defines
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes.{
-  AstNode,
-  Call,
-  CfgNode,
-  Expression,
-  FieldIdentifier,
-  Identifier,
-  Literal,
-  Member,
-  Method,
-  MethodReturn,
-  StoredNode,
-  TypeDecl
-}
-import org.slf4j.LoggerFactory
-import overflowdb.traversal.Traversal
-
-import java.util.concurrent.{ForkJoinPool, ForkJoinTask, RecursiveTask, RejectedExecutionException}
-import scala.util.{Failure, Success, Try}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.operatorextension.allAssignmentTypes
+import io.shiftleft.semanticcpg.utils.MemberAccess.isFieldAccess
+import org.slf4j.LoggerFactory
+
+import java.util.concurrent.*
+import scala.collection.mutable.ListBuffer
+import scala.util.{Failure, Success, Try}
 
 case class StartingPointWithSource(startingPoint: CfgNode, source: StoredNode)
-
+case class UsageInput(src: StoredNode, typeDecl: TypeDecl, astNode: AstNode)
+case class ResultSummary(result: List[StartingPointWithSource], methodTasks: List[UsageInput])
 object SourcesToStartingPoints {
 
   private val log = LoggerFactory.getLogger(SourcesToStartingPoints.getClass)
 
-  def sourceTravsToStartingPoints[NodeType](sourceTravs: Traversal[NodeType]*): List[StartingPointWithSource] = {
-    val fjp = ForkJoinPool.commonPool()
+  def sourceTravsToStartingPoints[NodeType](sourceTravs: IterableOnce[NodeType]*): List[StartingPointWithSource] = {
+    val executorService = Executors.newWorkStealingPool()
     try {
-      fjp.invoke(new SourceTravsToStartingPointsTask(sourceTravs: _*)).distinct
+      val sources = sourceTravs
+        .flatMap(_.iterator)
+        .collect { case n: StoredNode => n }
+        .dedup
+        .toList
+      sources.headOption
+        .map(src => {
+          // We need to get Cpg wrapper from graph. Hence we are taking head element from source iterator.
+          // This will also ensure if the source list is empty then these tasks are invoked.
+          val cpg                           = Cpg(src.graph)
+          val (startingPoints, methodTasks) = calculateStartingPoints(sources, executorService)
+          val startingPointFromUsageInOtherClasses =
+            calculateStatingPointsWithUsageInOtherClasses(methodTasks, cpg, executorService)
+          (startingPoints ++ startingPointFromUsageInOtherClasses)
+            .sortBy(_.source.id)
+        })
+        .getOrElse(Nil)
     } catch {
       case e: RejectedExecutionException =>
         log.error("Unable to execute 'SourceTravsToStartingPoints` task", e); List()
     } finally {
-      fjp.shutdown()
+      executorService.shutdown()
     }
   }
 
+  /** This will process and identify the starting points except the usage in other classes. This run will identify the
+    * required tasks for calculating starting points with usage in other classes.
+    *
+    * @param sources
+    *   \- Sources list
+    * @param executorService
+    *   \- Shared executor service to process the task in parallel
+    * @return
+    *   List of StartingPointWithSource and List of tasks for calculating starting points with usage in other classes
+    */
+  private def calculateStartingPoints(
+    sources: List[StoredNode],
+    executorService: ExecutorService
+  ): (List[StartingPointWithSource], List[UsageInput]) = {
+    val allExceptUsageInOtherClasses       = SourceStartingPointResultAggregator(sources.size)
+    val allExceptUsageInOtherClassesThread = new Thread(allExceptUsageInOtherClasses)
+    allExceptUsageInOtherClassesThread.setName("All except usage in other classes result aggregator")
+    allExceptUsageInOtherClassesThread.start()
+    sources.foreach(src =>
+      executorService.submit(new SourceToStartingPoints(src, allExceptUsageInOtherClasses.resultQueue))
+    )
+    allExceptUsageInOtherClassesThread.join()
+    (allExceptUsageInOtherClasses.finalResult.toList, allExceptUsageInOtherClasses.methodTasks.toList)
+  }
+
+  /** This will calculate starting points by finding the usage in other classes.
+    *
+    * @param methodTasks
+    *   \- Inputs required for processing
+    * @param cpg
+    *   \- cpg to get list of methods
+    * @param executorService
+    *   \- Shared executor service to process the task in parallel
+    * @return
+    *   List of StartingPointWithSource
+    */
+  private def calculateStatingPointsWithUsageInOtherClasses(
+    methodTasks: List[UsageInput],
+    cpg: Cpg,
+    executorService: ExecutorService
+  ): List[StartingPointWithSource] = {
+    val methods                   = cpg.method.l
+    val usageInOtherClasses       = SourceStartingPointResultAggregator(methods.size)
+    val usageInOtherClassesThread = new Thread(usageInOtherClasses)
+    usageInOtherClassesThread.setName("Usage in other classes result aggregator")
+    usageInOtherClassesThread.start()
+    methods.foreach(m =>
+      executorService.submit(new SourceToStartingPointsInMethod(m, methodTasks, usageInOtherClasses.resultQueue))
+    )
+    usageInOtherClassesThread.join()
+    usageInOtherClasses.finalResult.toList
+  }
 }
 
-class SourceTravsToStartingPointsTask[NodeType](sourceTravs: Traversal[NodeType]*)
-    extends RecursiveTask[List[StartingPointWithSource]] {
-
-  private val log = LoggerFactory.getLogger(this.getClass)
-
-  override def compute(): List[StartingPointWithSource] = {
-    val sources: List[StoredNode] = sourceTravs
-      .flatMap(_.toList)
-      .collect { case n: StoredNode => n }
-      .dedup
-      .toList
-      .sortBy(_.id)
-    val tasks = sources.map(src => (src, new SourceToStartingPoints(src).fork()))
-    tasks.flatMap { case (src, t: ForkJoinTask[List[CfgNode]]) =>
-      Try(t.get()) match {
-        case Failure(e)       => log.error("Unable to complete 'SourceToStartingPoints' task", e); List()
-        case Success(sources) => sources.map(s => StartingPointWithSource(s, src))
+/** Independent thread to collect and aggregate the results (StartingPointWithSource) from all the tasks. This will
+  * avoid the sequential wait for aggregating results from the queue.
+  *
+  * @param totalNoTasks
+  *   \- number of tasks for the exit condition.
+  */
+class SourceStartingPointResultAggregator(private var totalNoTasks: Int) extends Runnable {
+  val logger      = LoggerFactory.getLogger(this.getClass)
+  val finalResult = ListBuffer[StartingPointWithSource]()
+  val methodTasks = ListBuffer[UsageInput]()
+  val resultQueue = LinkedBlockingQueue[ResultSummary]()
+  override def run(): Unit = {
+    var terminate = false
+    while (!terminate) {
+      val taskResult = resultQueue.take()
+      finalResult ++= taskResult.result
+      methodTasks ++= taskResult.methodTasks
+      totalNoTasks -= 1
+      if (totalNoTasks == 0) {
+        logger.debug("Shutting down SourceStartingPointResultAggregator thread")
+        terminate = true
       }
     }
+  }
+}
+
+class SourceToStartingPointsInMethod(
+  m: Method,
+  usageInputs: List[UsageInput],
+  resultQueue: LinkedBlockingQueue[ResultSummary]
+) extends BaseSourceToStartingPoints {
+  override def call(): Unit = {
+    // Handling of the error situation. This will make sure aggregator thread will exit.
+    val result = Try(usageInOtherClasses(m, usageInputs)) match {
+      case Failure(e) =>
+        logger.error("Unable to complete 'SourceToStartingPointsInMethod' task", e)
+        List[StartingPointWithSource]()
+      case Success(result) => result
+    }
+    resultQueue.put(ResultSummary(result, List()))
+  }
+
+  private def usageInOtherClasses(m: Method, usageInputs: List[UsageInput]): List[StartingPointWithSource] = {
+    usageInputs.flatMap { case UsageInput(src, typeDecl, astNode) =>
+      m.fieldAccess
+        .or(
+          _.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName),
+          _.argument(1).isTypeRef.typeFullNameExact(typeDecl.fullName)
+        )
+        .where { x =>
+          astNode match {
+            case identifier: Identifier =>
+              x.argument(2).isFieldIdentifier.canonicalNameExact(identifier.name)
+            case fieldIdentifier: FieldIdentifier =>
+              x.argument(2).isFieldIdentifier.canonicalNameExact(fieldIdentifier.canonicalName)
+            case _ => Iterator.empty
+          }
+        }
+        .takeWhile(notLeftHandOfAssignment)
+        .headOption
+        .map(s => StartingPointWithSource(s, src))
+    }
+  }
+}
+
+class SourceToStartingPoints(src: StoredNode, resultQueue: LinkedBlockingQueue[ResultSummary])
+    extends BaseSourceToStartingPoints {
+  override def call(): Unit = {
+    // Handling of the error situation. This will make sure aggregator thread will exit.
+    val (result, usageInputs) = Try(sourceToStartingPoints(src)) match {
+      case Failure(e) =>
+        logger.error("Unable to complete 'SourceToStartingPoints' task", e)
+        (Nil, Nil)
+      case Success(result) => result
+    }
+    resultQueue.put(ResultSummary(result.map(s => StartingPointWithSource(s, src)), usageInputs))
   }
 }
 
@@ -72,52 +186,81 @@ class SourceTravsToStartingPointsTask[NodeType](sourceTravs: Traversal[NodeType]
   * each method, traversing the AST from left to right. This isn't fool-proof, e.g., goto-statements would be
   * problematic, but it works quite well in practice.
   */
-class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode]] {
+abstract class BaseSourceToStartingPoints extends Callable[Unit] {
+  val logger = LoggerFactory.getLogger(this.getClass)
 
-  private val cpg = Cpg(src.graph())
-
-  override def compute(): List[CfgNode] = {
+  protected def sourceToStartingPoints(src: StoredNode): (List[CfgNode], List[UsageInput]) = {
     src match {
       case methodReturn: MethodReturn =>
-        methodReturn.method.callIn.l
+        // n.b. there's a generated `callIn` step that we really want to use, but it's shadowed by `MethodTraversal.callIn`
+        (methodReturn.method._callIn.cast[Call].l, Nil)
       case lit: Literal =>
-        List(lit) ++ usages(targetsToClassIdentifierPair(literalToInitializedMembers(lit)))
+        val usageInput = targetsToClassIdentifierPair(literalToInitializedMembers(lit), src)
+        val uses       = usages(usageInput)
+        val globals = globalFromLiteral(lit, recursive = false).flatMap {
+          case x: Identifier if x.isModuleVariable => moduleVariableToFirstUsagesAcrossProgram(x)
+          case x                                   => x :: Nil
+        }
+        (lit :: (uses ++ globals), usageInput)
       case member: Member =>
-        val initializedMember = memberToInitializedMembers(member)
-        usages(targetsToClassIdentifierPair(List(member)))
-      case x => List(x).collect { case y: CfgNode => y }
+        val usageInput = targetsToClassIdentifierPair(List(member), src)
+        (usages(usageInput), usageInput)
+      case x: Identifier =>
+        val fieldAndIndexAccesses = withFieldAndIndexAccesses(x :: Nil)
+        val capturedReferences = x.refsTo.capturedByMethodRef.referencedMethod.flatMap(firstUsagesForName(x.name, _)).l
+
+        (
+          (x :: fieldAndIndexAccesses ++ capturedReferences) flatMap {
+            case x: Call => handleCallNode(x) // Handle the case if this is an arg to another call
+            case x       => x :: Nil
+          },
+          Nil
+        )
+      case x: Call    => (handleCallNode(x), Nil)
+      case x: CfgNode => (x :: Nil, Nil)
+      case _          => (Nil, Nil)
     }
   }
 
-  private def usages(pairs: List[(TypeDecl, AstNode)]): List[CfgNode] = {
-    pairs.flatMap { case (typeDecl, astNode) =>
-      val nonConstructorMethods = methodsRecursively(typeDecl)
-        .and(
-          _.whereNot(_.nameExact(Defines.StaticInitMethodName, Defines.ConstructorMethodName)),
-          // handle Python
-          _.whereNot(_.name(".*<body>$"))
-        )
+  private def handleCallNode(callNode: Call): List[CfgNode] = callNode :: callNode._receiverIn.collectAll[CfgNode].l
+
+  private def withFieldAndIndexAccesses(nodes: List[CfgNode]): List[CfgNode] =
+    nodes.flatMap {
+      case moduleVar: Identifier if moduleVar.isModuleVariable =>
+        moduleVar :: moduleVariableToFirstUsagesAcrossProgram(moduleVar)
+      case identifier: Identifier => identifier :: fieldAndIndexAccesses(identifier)
+      case x                      => x :: Nil
+    }
+
+  private def fieldAndIndexAccesses(identifier: Identifier): List[CfgNode] =
+    identifier.method._identifierViaContainsOut
+      .nameExact(identifier.name)
+      .inCall
+      .collect { case c if isFieldAccess(c.name) => c }
+      .l
+
+  /** Finds the first usages of this module variable across all importing modules.
+    *
+    * TODO: This is wrapped in a try-catch because of the deprecated Ruby frontend crashing this process due to a
+    * missing `.method` parent node in the contains graph.
+    */
+  private def moduleVariableToFirstUsagesAcrossProgram(moduleVar: Identifier): List[CfgNode] = Try {
+    moduleVar.start.moduleVariables.references
+      .groupBy(_.method)
+      .map {
+        case (sameModule, _) if moduleVar.method == sameModule => fieldAndIndexAccesses(moduleVar)
+        case (_, references)                                   => references.filterNot(notLeftHandOfAssignment)
+      }
+      .flatMap(_.sortBy(i => (i.lineNumber, i.columnNumber)).headOption)
+      .toList
+  }.getOrElse(List.empty)
+
+  private def usages(usageInput: List[UsageInput]): List[CfgNode] = {
+    usageInput.flatMap { case UsageInput(_, typeDecl, astNode) =>
+      val nonConstructorMethods = methodsRecursively(typeDecl).iterator
+        .whereNot(_.nameExact(Defines.StaticInitMethodName, Defines.ConstructorMethodName, "__init__"))
         .l
-
-      val usagesInSameClass =
-        nonConstructorMethods.flatMap { m => firstUsagesOf(astNode, m, typeDecl) }
-
-      val usagesInOtherClasses = cpg.method.flatMap { m =>
-        m.fieldAccess
-          .where(_.argument(1).isIdentifier.typeFullNameExact(typeDecl.fullName))
-          .where { x =>
-            astNode match {
-              case identifier: Identifier =>
-                x.argument(2).isFieldIdentifier.canonicalNameExact(identifier.name)
-              case fieldIdentifier: FieldIdentifier =>
-                x.argument(2).isFieldIdentifier.canonicalNameExact(fieldIdentifier.canonicalName)
-              case _ => List()
-            }
-          }
-          .takeWhile(notLeftHandOfAssignment)
-          .headOption
-      }.l
-      usagesInSameClass ++ usagesInOtherClasses
+      nonConstructorMethods.flatMap { m => firstUsagesOf(astNode, m, typeDecl) }
     }
   }
 
@@ -126,9 +269,9 @@ class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode
   private def firstUsagesOf(astNode: AstNode, m: Method, typeDecl: TypeDecl): List[Expression] = {
     astNode match {
       case member: Member =>
-        usagesForName(member.name, m)
+        firstUsagesForName(member.name, m)
       case identifier: Identifier =>
-        usagesForName(identifier.name, m)
+        firstUsagesForName(identifier.name, m)
       case fieldIdentifier: FieldIdentifier =>
         val fieldIdentifiers = m.ast.isFieldIdentifier.sortBy(x => (x.lineNumber, x.columnNumber)).l
         fieldIdentifiers
@@ -142,91 +285,67 @@ class SourceToStartingPoints(src: StoredNode) extends RecursiveTask[List[CfgNode
     }
   }
 
-  private def usagesForName(name: String, m: Method): List[Expression] = {
-    val identifiers      = m.ast.isIdentifier.sortBy(x => (x.lineNumber, x.columnNumber)).l
+  private def firstUsagesForName(name: String, m: Method): List[Expression] = {
+    val identifiers      = m._identifierViaContainsOut.l
     val identifierUsages = identifiers.nameExact(name).takeWhile(notLeftHandOfAssignment).l
-    val fieldIdentifiers = m.ast.isFieldIdentifier.sortBy(x => (x.lineNumber, x.columnNumber)).l
+    val fieldIdentifiers = m.fieldAccess.fieldIdentifier.sortBy(x => (x.lineNumber, x.columnNumber)).l
+    val thisRefs         = Seq("this", "self") ++ m.typeDecl.name.headOption.toList
     val fieldAccessUsages = fieldIdentifiers.isFieldIdentifier
       .canonicalNameExact(name)
       .inFieldAccess
-      .where(_.argument(1).codeExact("this", "self", m.typeDecl.name.head))
+      .where(_.argument(1).codeExact(thisRefs*))
       .takeWhile(notLeftHandOfAssignment)
       .l
-    (identifierUsages ++ fieldAccessUsages).headOption.toList
+    (identifierUsages ++ fieldAccessUsages).sortBy(x => (x.lineNumber, x.columnNumber)).headOption.toList
   }
 
   /** For a literal, determine if it is used in the initialization of any member variables. Return list of initialized
     * members. An initialized member is either an identifier or a field-identifier.
     */
-  private def literalToInitializedMembers(lit: Literal): List[Expression] = {
+  private def literalToInitializedMembers(lit: Literal): List[CfgNode] =
     lit.inAssignment
       .or(
         _.method.nameExact(Defines.StaticInitMethodName, Defines.ConstructorMethodName, "__init__"),
-        _.method.name(".*<body>.*")
+        // in language such as Python, where assignments for members can be directly under a type decl
+        _.method.typeDecl
       )
       .target
       .flatMap {
-        case identifier: Identifier => List(identifier)
-        case call: Call if call.name == Operators.fieldAccess =>
-          call.ast.isFieldIdentifier.l
-        case _ => List[Expression]()
+        case identifier: Identifier
+            // If these are the same, then the parent method is the module-level type
+            if identifier.method.typeDecl.fullName.contains(identifier.method.fullName) ||
+              // If a member shares the name of the identifier then we consider this as a member
+              lit.method.typeDecl.member.name.toSet.contains(identifier.name) =>
+          identifier :: Nil
+        case call: Call if isFieldAccess(call.name) => call.ast.isFieldIdentifier.l
+        case _                                      => Nil
       }
       .l
-  }
-
-  /** Classes have a static initialization method (cinit) and a non-static initialization method (init), and each member
-    * should be initialized in at least one of them. This method identifies the initialization assignments for a given
-    * member and returns the left-hand sides (targets) of these assignments.
-    */
-  private def memberToInitializedMembers(member: Member): List[Expression] = {
-    val nodesInConstructors = astNodesInConstructors(member)
-
-    nodesInConstructors.flatMap { x =>
-      x match {
-        case identifier: Identifier if identifier.name == member.name =>
-          isTargetInAssignment(identifier)
-        case fieldIdentifier: FieldIdentifier if fieldIdentifier.canonicalName == member.head.name =>
-          Traversal(fieldIdentifier).where(_.inAssignment).l
-        case _ => List[Expression]()
-      }
-    }.l
-  }
-
-  private def astNodesInConstructors(member: Member) = {
-    methodsRecursively(member.typeDecl)
-      .or(
-        _.nameExact(Defines.StaticInitMethodName, Defines.ConstructorMethodName),
-        // this is for python
-        _.name(".*<body>$")
-      )
-      .ast
-      .l
-  }
 
   private def methodsRecursively(typeDecl: TypeDecl): List[Method] = {
     def methods(x: AstNode): List[Method] = {
       x match {
         case m: Method => m :: m.astMinusRoot.isMethod.flatMap(methods).l
-        case _         => List()
+        case _         => Nil
       }
     }
     typeDecl.method.flatMap(methods).l
   }
 
   private def isTargetInAssignment(identifier: Identifier): List[Identifier] = {
-    Traversal(identifier).argumentIndex(1).where(_.inAssignment).l
+    identifier.start.argumentIndex(1).where(_.inAssignment).l
   }
 
-  private def notLeftHandOfAssignment(x: Expression): Boolean = {
+  protected def notLeftHandOfAssignment(x: Expression): Boolean = {
     !(x.argumentIndex == 1 && x.inCall.exists(y => allAssignmentTypes.contains(y.name)))
   }
 
-  private def targetsToClassIdentifierPair(targets: List[AstNode]): List[(TypeDecl, AstNode)] = {
+  private def targetsToClassIdentifierPair(targets: List[AstNode], src: StoredNode): List[UsageInput] = {
     targets.flatMap {
       case expr: Expression =>
-        expr.method.typeDecl.map { typeDecl => (typeDecl, expr) }
+        expr.method.typeDecl.map { typeDecl => UsageInput(src, typeDecl, expr) }
       case member: Member =>
-        member.typeDecl.map { typeDecl => (typeDecl, member) }
+        member.typeDecl.map { typeDecl => UsageInput(src, typeDecl, member) }
     }
   }
 

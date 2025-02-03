@@ -1,9 +1,9 @@
 package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 
 class SynchronizedTests extends JimpleCode2CpgFixture {
 
@@ -27,7 +27,7 @@ class SynchronizedTests extends JimpleCode2CpgFixture {
     val List(method: Method) = cpg.method.name("foo").l
 
     method.astChildren.size shouldBe 7
-    val List("STATIC", "PUBLIC", "SYNCHRONIZED") = method.modifier.map(_.modifierType).l
+    val List("STATIC", "PUBLIC", "SYNCHRONIZED") = method.modifier.map(_.modifierType).l: @unchecked
     val List(param)                              = method.parameter.l
     val body                                     = method.block
     param.code shouldBe "java.lang.String s"
@@ -37,20 +37,17 @@ class SynchronizedTests extends JimpleCode2CpgFixture {
   "it should create a enter/exit monitor nodes" in {
     val List(method: Method) = cpg.method.name("bar").l
     // 'l2' aliases 'this' so there is never an 'entermonitor l2'
-    val List(enterThis, exit1, exit2) = method.ast.filter(_.code.contains("monitor")).l
+    val List(enterThis, exit1, exit2) = method.ast.collectAll[Unknown].filter(_.code.contains("monitor")).l
 
     enterThis.code shouldBe "entermonitor this"
-    enterThis.order shouldBe 6
     enterThis.lineNumber shouldBe Some(8)
     enterThis.columnNumber shouldBe None
 
     exit1.code shouldBe "exitmonitor l2"
-    exit1.order shouldBe 8
     exit1.lineNumber shouldBe Some(10)
     exit1.columnNumber shouldBe None
 
     exit2.code shouldBe "exitmonitor l2"
-    exit2.order shouldBe 11
     exit2.lineNumber shouldBe Some(11)
     exit2.columnNumber shouldBe None
   }

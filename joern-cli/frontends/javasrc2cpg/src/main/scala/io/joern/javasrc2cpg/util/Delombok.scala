@@ -1,11 +1,14 @@
 package io.joern.javasrc2cpg.util
 
 import better.files.File
+import io.joern.javasrc2cpg.util.Delombok.DelombokMode.*
 import io.joern.x2cpg.utils.ExternalCommand
 import org.slf4j.LoggerFactory
 
-import java.nio.file.Paths
-import scala.util.{Failure, Success, Try}
+import java.nio.file.Path
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
 object Delombok {
 
@@ -17,6 +20,8 @@ object Delombok {
     case object TypesOnly   extends DelombokMode
     case object RunDelombok extends DelombokMode
   }
+
+  case class DelombokRunResult(path: Path, isDelombokedPath: Boolean)
 
   private val logger = LoggerFactory.getLogger(this.getClass)
 
@@ -32,7 +37,7 @@ object Delombok {
       .getOrElse("java")
   }
 
-  private def delombokToTempDirCommand(tempDir: File, analysisJavaHome: Option[String]) = {
+  private def delombokToTempDirCommand(inputPath: Path, outputDir: File, analysisJavaHome: Option[String]) = {
     val javaPath = analysisJavaHome.getOrElse(systemJavaPath)
     val classPathArg = Try(File.newTemporaryFile("classpath").deleteOnExit()) match {
       case Success(file) =>
@@ -47,25 +52,68 @@ object Delombok {
         )
         System.getProperty("java.class.path")
     }
-    s"$javaPath -cp $classPathArg lombok.launch.Main delombok . -d ${tempDir.canonicalPath}"
+    val command =
+      Seq(
+        javaPath,
+        "-cp",
+        classPathArg,
+        "lombok.launch.Main",
+        "delombok",
+        inputPath.toAbsolutePath.toString,
+        "-d",
+        outputDir.canonicalPath
+      )
+    logger.debug(s"Executing delombok with command ${command.mkString(" ")}")
+    command
   }
 
-  def run(projectDir: String, analysisJavaHome: Option[String]): String = {
+  def delombokPackageRoot(
+    projectDir: Path,
+    relativePackageRoot: Path,
+    delombokTempDir: File,
+    analysisJavaHome: Option[String]
+  ): Try[String] = {
+    val rootIsFile = File(projectDir.resolve(relativePackageRoot)).isRegularFile
+    val relativeOutputPath =
+      if (rootIsFile) Option(relativePackageRoot.getParent).map(_.toString).getOrElse(".")
+      else relativePackageRoot.toString
+    val inputDir = projectDir.resolve(relativePackageRoot)
+    Try(delombokTempDir.createChild(relativeOutputPath, asDirectory = true)).flatMap { packageOutputDir =>
+      ExternalCommand
+        .run(delombokToTempDirCommand(inputDir, packageOutputDir, analysisJavaHome), ".")
+        .toTry
+        .map(_ => delombokTempDir.path.toAbsolutePath.toString)
+    }
+  }
+
+  def run(
+    inputPath: Path,
+    fileInfo: List[SourceParser.FileInfo],
+    analysisJavaHome: Option[String]
+  ): DelombokRunResult = {
     Try(File.newTemporaryDirectory(prefix = "delombok").deleteOnExit()) match {
+      case Failure(_) =>
+        logger.warn(s"Could not create temporary directory for delombok output. Scanning original sources instead")
+        DelombokRunResult(inputPath, false)
+
       case Success(tempDir) =>
-        ExternalCommand.run(delombokToTempDirCommand(tempDir, analysisJavaHome), cwd = projectDir) match {
-          case Success(_) =>
-            tempDir.path.toAbsolutePath.toString
+        PackageRootFinder
+          .packageRootsFromFiles(inputPath, fileInfo)
+          .foreach(delombokPackageRoot(inputPath, _, tempDir, analysisJavaHome))
+        DelombokRunResult(tempDir.path, true)
+    }
+  }
 
-          case Failure(t) =>
-            logger.warn(s"Executing delombok failed", t)
-            logger.warn("Creating AST with original source instead. Some methods and type information will be missing.")
-            projectDir
-        }
-
-      case Failure(e) =>
-        logger.warn(s"Failed to create temporary directory for delomboked source. Methods and types may be missing", e)
-        projectDir
+  def parseDelombokModeOption(delombokModeStr: Option[String]): DelombokMode = {
+    delombokModeStr.map(_.toLowerCase) match {
+      case None                 => Default
+      case Some("no-delombok")  => NoDelombok
+      case Some("default")      => Default
+      case Some("types-only")   => TypesOnly
+      case Some("run-delombok") => RunDelombok
+      case Some(value) =>
+        logger.warn(s"Found unrecognised delombok mode `$value`. Using default instead.")
+        Default
     }
   }
 }

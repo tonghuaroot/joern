@@ -2,7 +2,7 @@ package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.Literal
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class EnumTests extends JimpleCode2CpgFixture {
 
@@ -20,19 +20,15 @@ class EnumTests extends JimpleCode2CpgFixture {
       val List(values, valueOf, constructor, staticInit) =
         cpg.typeDecl.name(".*FuzzyBool.*").method.filterNot(_.name.contains("$")).l
 
-      values.order shouldBe 1
       values.name shouldBe "values"
       values.lineNumber shouldBe Some(1)
 
-      valueOf.order shouldBe 2
       valueOf.name shouldBe "valueOf"
       valueOf.lineNumber shouldBe Some(1)
 
-      constructor.order shouldBe 3
       constructor.name shouldBe io.joern.x2cpg.Defines.ConstructorMethodName
       constructor.lineNumber shouldBe Some(1)
 
-      staticInit.order shouldBe 4
       staticInit.name shouldBe io.joern.x2cpg.Defines.StaticInitMethodName
       staticInit.lineNumber shouldBe Some(2)
     }

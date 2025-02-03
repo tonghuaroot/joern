@@ -1,10 +1,10 @@
 package io.joern.x2cpg.passes.base
 
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.NodeTypes
 import io.shiftleft.codepropertygraph.generated.nodes.{NewTypeDecl, TypeDeclBase}
 import io.shiftleft.passes.CpgPass
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.{FileTraversal, NamespaceTraversal}
 
 /** This pass has no other pass as prerequisite. For each `TYPE` node that does not have a corresponding `TYPE_DECL`
@@ -27,21 +27,32 @@ class TypeDeclStubCreator(cpg: Cpg) extends CpgPass(cpg) {
     cpg.typ
       .filterNot(typ => typeDeclFullNameToNode.isDefinedAt(typ.fullName))
       .foreach { typ =>
-        val newTypeDecl = createTypeDeclStub(typ.name, typ.fullName)
+        val newTypeDecl = TypeDeclStubCreator.createTypeDeclStub(typ.name, typ.fullName)
         typeDeclFullNameToNode += typ.fullName -> newTypeDecl
         dstGraph.addNode(newTypeDecl)
       }
   }
 
-  private def createTypeDeclStub(name: String, fullName: String): NewTypeDecl = {
+}
+
+object TypeDeclStubCreator {
+
+  def createTypeDeclStub(
+    name: String,
+    fullName: String,
+    isExternal: Boolean = true,
+    astParentType: String = NodeTypes.NAMESPACE_BLOCK,
+    astParentFullName: String = NamespaceTraversal.globalNamespaceName,
+    fileName: String = FileTraversal.UNKNOWN
+  ): NewTypeDecl = {
     NewTypeDecl()
       .name(name)
       .fullName(fullName)
-      .isExternal(true)
+      .isExternal(isExternal)
       .inheritsFromTypeFullName(IndexedSeq.empty)
-      .astParentType(NodeTypes.NAMESPACE_BLOCK)
-      .astParentFullName(NamespaceTraversal.globalNamespaceName)
-      .filename(FileTraversal.UNKNOWN)
+      .astParentType(astParentType)
+      .astParentFullName(astParentFullName)
+      .filename(fileName)
   }
 
 }

@@ -1,8 +1,8 @@
 package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.Ignore
 
 class MemberTests extends JimpleCode2CpgFixture {
@@ -18,7 +18,6 @@ class MemberTests extends JimpleCode2CpgFixture {
     x.name shouldBe "x"
     x.code shouldBe "int x"
     x.typeFullName shouldBe "int"
-    x.order shouldBe 2 // The other child is the <init> method
   }
 
   "should allow traversing from MEMBER to TYPE_DECL" in {

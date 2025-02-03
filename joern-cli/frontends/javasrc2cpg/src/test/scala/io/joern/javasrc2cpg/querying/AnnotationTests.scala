@@ -1,10 +1,33 @@
 package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.shiftleft.codepropertygraph.generated.nodes.{Annotation, AnnotationLiteral, ArrayInitializer}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 
 class AnnotationTests extends JavaSrcCode2CpgFixture {
+  "annotations that cannot be resolved from imports" should {
+    val cpg = code("""
+        |package foo;
+        |
+        |@interface TestMarker {}
+        |""".stripMargin)
+      .moreCode("""
+          |package bar;
+          |
+          |import foo.*;
+          |import bar.*;
+          |
+          |public class Bar {
+          |  @TestMarker
+          |  public void bar() {}
+          |}
+          |""".stripMargin)
+
+    "have the annotation type be resolved" in {
+      cpg.method.name("bar").annotation.fullName.l shouldBe List("foo.TestMarker")
+    }
+  }
+
   "normal value annotations" should {
     lazy val cpg = code("""
         |import some.NormalAnnotation;
@@ -23,6 +46,8 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "NormalAnnotation"
       annotationNode.fullName shouldBe "some.NormalAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
+      annotationNode.asInstanceOf[CfgNode].method.fullName shouldBe "SomeClass.function:void()"
     }
 
     "test annotation node parameter assignment child" in {
@@ -63,6 +88,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "SingleAnnotation"
       annotationNode.fullName shouldBe "some.SingleAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter assignment child" in {
@@ -82,6 +108,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       paramValue.code shouldBe "classAnnotation"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
+      paramValue.method.fullName shouldBe "SomeClass.function:void()"
     }
   }
 
@@ -102,6 +129,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "MarkerAnnotation"
       annotationNode.fullName shouldBe "some.MarkerAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter assignment child" in {
@@ -127,6 +155,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "MarkerAnnotation"
       annotationNode.fullName shouldBe "some.MarkerAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter assignment child" in {
@@ -150,6 +179,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "MarkerAnnotation"
       annotationNode.fullName shouldBe "some.MarkerAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(17)
     }
   }
 
@@ -167,6 +197,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "MarkerAnnotation"
       annotationNode.fullName shouldBe "some.MarkerAnnotation"
       annotationNode.lineNumber shouldBe Some(4)
+      annotationNode.columnNumber shouldBe Some(3)
     }
   }
 
@@ -187,10 +218,12 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "NormalAnnotation"
       annotationNode.fullName shouldBe "some.NormalAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: AnnotationLiteral) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: AnnotationLiteral) =
+        cpg.method.name("function").annotation.parameterAssign.value.isAnnotationLiteral.l
       paramValue.code shouldBe "2"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
@@ -214,6 +247,7 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "NormalAnnotation"
       annotationNode.fullName shouldBe "some.NormalAnnotation"
       annotationNode.lineNumber shouldBe Some(5)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter assignment child" in {
@@ -229,7 +263,8 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: ArrayInitializer) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: ArrayInitializer) =
+        cpg.method.name("function").annotation.parameterAssign.value.isArrayInitializer.l
       paramValue.code shouldBe "{ \"aaa\", \"bbb\" }"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
@@ -263,10 +298,11 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
       annotationNode.name shouldBe "NormalAnnotation"
       annotationNode.fullName shouldBe "some.NormalAnnotation"
       annotationNode.lineNumber shouldBe Some(6)
+      annotationNode.columnNumber shouldBe Some(3)
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: Annotation) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: Annotation) = cpg.method.name("function").annotation.parameterAssign.value.isAnnotation.l
       paramValue.code shouldBe "@OtherAnnotation"
       paramValue.fullName shouldBe "some.OtherAnnotation"
       paramValue.order shouldBe 2
@@ -303,6 +339,29 @@ class AnnotationTests extends JavaSrcCode2CpgFixture {
 
         case result => fail(s"Expected 3 annotations for Foo but got $result")
       }
+    }
+  }
+
+  "CPG for code with a custom annotation" should {
+    val cpg = code("""
+        |package mypak;
+        |
+        |import retrofit2.http.Body;
+        |import retrofit2.http.POST;
+        |
+        |public interface User {
+        |
+        |    @POST("/name")
+        |    public Call<Response> getUser(@Body Request request);
+        |}
+        |""".stripMargin)
+
+    "contain an ANNOTATION node" in {
+      cpg.all.collectAll[Annotation].codeExact("@POST(\"/name\")").size shouldBe 1
+    }
+
+    "the ANNOTATION node should have correct full name" in {
+      cpg.all.collectAll[Annotation].codeExact("@POST(\"/name\")").fullName.head shouldBe "retrofit2.http.POST"
     }
   }
 }

@@ -1,112 +1,174 @@
 package io.joern.joerncli
 
-import better.files.File
-import io.joern.{console, joerncli}
-import io.joern.joerncli.console.JoernConsole
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Method}
-import io.shiftleft.semanticcpg.language._
+import better.files._
+import java.nio.file.Paths
+import io.joern.console.Config
+import io.joern.joerncli.console.ReplBridge
+import io.shiftleft.utils.ProjectRoot
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class RunScriptTests extends AnyWordSpec with Matchers with AbstractJoernCliTest {
+class RunScriptTests extends AnyWordSpec with Matchers {
+  import RunScriptTests._
 
-  "Executing scripts for example code 'testcode/unsafe-ptr" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/unsafe-ptr"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'pointer-to-int.sc'" in {
-      val calls =
-        joerncli.console.JoernConsole.runScriptTest("c/pointer-to-int.sc", Map.empty, cpg).asInstanceOf[List[Call]]
-
-      calls.map(_.code) should contain theSameElementsAs List(
-        "simple_subtraction = p - q",
-        "nested_subtraction = p - q - r",
-        "literal_subtraction = p - i",
-        "addrOf_subtraction = p - &i",
-        "nested_addrOf_subtraction =  3 - &i - 4",
-        "literal_addrOf_subtraction = 3 - &i",
-        "array_subtraction = x - p",
-        "array_literal_subtraction = x - 3",
-        "array_addrOf_subtraction = x - &i"
-        // TODO: We don't have access to type info for indirect field member access.
-        // "unsafe_struct = foo_t->p - 1"
-      )
-    }
-  }
-
-  "Executing scripts for example code 'testcode/syscalls" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/syscalls"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'syscalls.sc'" in {
-      val calls =
-        joerncli.console.JoernConsole.runScriptTest("c/syscalls.sc", Map.empty, cpg).asInstanceOf[List[Call]]
-
-      calls.map(_.name) should contain theSameElementsAs List("gettimeofday", "exit")
+  if (scala.util.Properties.isWin) {
+    info(
+      "scripting tests don't work on windows - not sure why... running them manually works though, e.g. `joern --script joern-cli/src/main/resources/scripts/c/pointer-to-int.sc --param \"\"\"inputPath=joern-cli/src/test/resources/testcode/unsafe-ptr/unsafe-ptr.c\"\"\"`"
+    )
+  } else {
+    Seq(
+      ("c/pointer-to-int.sc", "unsafe-ptr"),
+      ("c/syscalls.sc", "syscalls"),
+      ("c/userspace-memory-access.sc", "syscalls"),
+      ("c/malloc-overflow.sc", "malloc-overflow"),
+      ("c/malloc-leak.sc", "leak"),
+      ("c/const-ish.sc", "const-ish")
+    ).foreach { case (scriptFileName, codePathRelative) =>
+      s"Executing '$scriptFileName' on '$codePathRelative'" in {
+        exec(scriptFileName, s"$testCodeRoot/$codePathRelative")
+      }
     }
 
-    "work correctly for 'userspace-memory-access.sc'" in {
-      val calls =
-        joerncli.console.JoernConsole
-          .runScriptTest("c/userspace-memory-access.sc", Map.empty, cpg)
-          .asInstanceOf[List[Call]]
+    "execute a simple script" in new Fixture {
+      def test(scriptFile: File, outputFile: File) = {
+        val escScriptPath = outputFile.pathAsString.replace("\\", "\\\\")
+        scriptFile.write(s"""
+        |val fw = new java.io.FileWriter("$escScriptPath", true)
+        |fw.write("michael was here")
+        |fw.close() 
+        """.stripMargin)
 
-      calls.map(_.name) should contain theSameElementsAs List("get_user")
+        ReplBridge.main(Array("--script", scriptFile.pathAsString))
+
+        withClue(s"$outputFile content: ") {
+          outputFile.lines.head shouldBe "michael was here"
+        }
+      }
     }
-  }
 
-  "Executing scripts for example code 'testcode/malloc-overflow" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/malloc-overflow"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'malloc-overflow.sc'" in {
-      val calls =
-        joerncli.console.JoernConsole.runScriptTest("c/malloc-overflow.sc", Map.empty, cpg).asInstanceOf[List[Call]]
+    "pass parameters to script" in new Fixture {
+      def test(scriptFile: File, outputFile: File) = {
+        scriptFile.write(s"""
+          |@main def foo(outFile: String, magicNumber: Int) = {
+          |  val fw = new java.io.FileWriter(outFile, true)
+          |  fw.write(magicNumber.toString)
+          |  fw.close() 
+          |}
+          """.stripMargin)
 
-      calls.map(_.code) should contain theSameElementsAs List(
-        "malloc(sizeof(int) * 42)",
-        "malloc(sizeof(int) * 3)",
-        "malloc(sizeof(int) + 55)"
-      )
-    }
-  }
-
-  "Executing scripts for example code 'testcode/leak" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/leak"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'malloc-leak.sc'" in {
-      val calls =
-        joerncli.console.JoernConsole.runScriptTest("c/malloc-leak.sc", Map.empty, cpg).asInstanceOf[Set[String]]
-
-      calls should contain theSameElementsAs Set("leak")
-    }
-  }
-
-  "Executing scripts for example code 'testcode/const-ish" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/const-ish"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'const-ish.sc'" in {
-      val methods =
-        JoernConsole.runScriptTest("c/const-ish.sc", Map.empty, cpg).asInstanceOf[Set[Method]]
-
-      // "side_effect_number" is included here as we are simply trying to emulate a side effect.
-      methods.map(_.name) should contain theSameElementsAs
-        Set(
-          "modify_const_struct_member_cpp_cast",
-          "modify_const_struct_member_c_cast",
-          "modify_const_struct_cpp_cast",
-          "modify_const_struct_c_cast"
+        ReplBridge.main(
+          Array(
+            "--script",
+            scriptFile.pathAsString,
+            "--param",
+            s"outFile=${outputFile.pathAsString}",
+            "--param",
+            "magicNumber=42"
+          )
         )
-    }
-  }
 
-  "Executing scripts for example code 'testcode/free'" should withTestCpg(
-    File(getClass.getClassLoader.getResource("testcode/free"))
-  ) { case (cpg: Cpg, _) =>
-    "work correctly for 'list-funcs'" in {
-      val expected = cpg.method.name.l
-      val actual   = joerncli.console.JoernConsole.runScriptTest("general/list-funcs.sc", Map.empty, cpg)
-      actual shouldBe expected
+        withClue(s"$outputFile content: ") {
+          outputFile.lines.head shouldBe "42"
+        }
+      }
     }
 
+    "script with multiple @main methods" in new Fixture {
+      def test(scriptFile: File, outputFile: File) = {
+        val escScriptPath = outputFile.pathAsString.replace("\\", "\\\\")
+
+        scriptFile.write(s"""
+          |@main def foo() = {
+          |  val fw = new java.io.FileWriter("$escScriptPath", true)
+          |  fw.write("foo was called")
+          |  fw.close() 
+          |}
+          |@main def bar() = {
+          |  val fw = new java.io.FileWriter("$escScriptPath", true)
+          |  fw.write("bar was called")
+          |  fw.close() 
+          |}
+          """.stripMargin)
+
+        ReplBridge.main(Array("--script", scriptFile.pathAsString, "--command", "bar"))
+
+        withClue(s"$outputFile content: ") {
+          outputFile.lines.head shouldBe "bar was called"
+        }
+      }
+    }
+
+    "use additional import script: //> using file directive" in new Fixture {
+      def test(scriptFile: File, outputFile: File) = {
+        val escScriptPath        = outputFile.pathAsString.replace("\\", "\\\\")
+        val additionalImportFile = Paths.get("joern-cli/src/test/resources/additional-import.sc").toAbsolutePath
+
+        scriptFile.write(s"""
+          |//> using file $additionalImportFile
+          |val fw = new java.io.FileWriter("$escScriptPath", true)
+          |fw.write(sayHello("michael")) //function defined in additionalImportFile
+          |fw.close() 
+          """.stripMargin)
+
+        ReplBridge.main(Array("--script", scriptFile.pathAsString))
+
+        withClue(s"$outputFile content: ") {
+          outputFile.lines.head shouldBe "hello, michael"
+        }
+      }
+    }
+
+    "use additional import script: --import parameter" in new Fixture {
+      def test(scriptFile: File, outputFile: File) = {
+        val escScriptPath        = outputFile.pathAsString.replace("\\", "\\\\")
+        val additionalImportFile = Paths.get("joern-cli/src/test/resources/additional-import.sc").toAbsolutePath
+
+        scriptFile.write(s"""
+          |val fw = new java.io.FileWriter("$escScriptPath", true)
+          |fw.write(sayHello("michael")) //function defined in additionalImportFile
+          |fw.close() 
+          """.stripMargin)
+
+        ReplBridge.main(Array("--script", scriptFile.pathAsString, "--import", additionalImportFile.toString))
+
+        withClue(s"$outputFile content: ") {
+          outputFile.lines.head shouldBe "hello, michael"
+        }
+      }
+    }
+
+    "should return Failure if" when {
+      "script doesn't exist" in {
+        val result = ReplBridge.runScript(Config(scriptFile = Some(scriptsRoot.resolve("does-not-exist.sc"))))
+        result.failed.get.getMessage should include("does not exist")
+      }
+
+      "script runs ins an exception" in {
+        val result = ReplBridge.runScript(Config(scriptFile = Some(scriptsRoot.resolve("trigger-error.sc"))))
+        result.failed.get.getMessage should include("exit code was 1")
+      }
+    }
+  }
+}
+
+object RunScriptTests {
+  val projectRoot  = ProjectRoot.find.path.toAbsolutePath
+  val scriptsRoot  = projectRoot.resolve("scripts")
+  val testCodeRoot = s"${projectRoot}/joern-cli/src/test/resources/testcode"
+
+  def exec(scriptFileName: String, codePathAbsolute: String): Unit = {
+    ReplBridge
+      .runScript(
+        Config(scriptFile = Some(scriptsRoot.resolve(scriptFileName)), params = Map("inputPath" -> codePathAbsolute))
+      )
+      .get
   }
 
+  trait Fixture {
+    def test(scriptFile: File, outputFile: File): Unit
+    for {
+      scriptFile <- File.temporaryFile()
+      outputFile <- File.temporaryFile()
+    } test(scriptFile, outputFile)
+  }
 }

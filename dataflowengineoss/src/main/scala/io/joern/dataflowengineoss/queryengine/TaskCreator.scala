@@ -1,15 +1,16 @@
 package io.joern.dataflowengineoss.queryengine
 
 import io.joern.dataflowengineoss.queryengine.Engine.argToOutputParams
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, Expression, MethodParameterIn, MethodParameterOut, Return}
-import io.shiftleft.semanticcpg.language.NoResolve
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.{NodeOps, Traversal}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.{Cpg, Languages}
+import io.shiftleft.semanticcpg.language.*
+import org.slf4j.{Logger, LoggerFactory}
 
 /** Creation of new tasks from results of completed tasks.
   */
 class TaskCreator(context: EngineContext) {
+
+  private val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
   /** For a given list of results and sources, generate new tasks.
     */
@@ -66,13 +67,20 @@ class TaskCreator(context: EngineContext) {
 
   /** For a given parameter of a method, determine all corresponding arguments at all call sites to the method.
     */
-  private def paramToArgs(param: MethodParameterIn): List[Expression] =
-    paramToArgsOfCallers(param) ++ paramToMethodRefCallReceivers(param)
+  private def paramToArgs(param: MethodParameterIn): List[Expression] = {
+    val args = paramToArgsOfCallers(param) ++ paramToMethodRefCallReceivers(param)
+    if (args.size > context.config.maxArgsToAllow) {
+      logger.warn(s"Too many arguments for parameter: ${args.size}. Not expanding")
+      logger.warn("Method name: " + param.method.fullName)
+      List()
+    } else {
+      args
+    }
+  }
 
   private def paramToArgsOfCallers(param: MethodParameterIn): List[Expression] =
     NoResolve
       .getMethodCallsites(param.method)
-      .to(Traversal)
       .collectAll[Call]
       .argument(param.index)
       .l
@@ -81,9 +89,15 @@ class TaskCreator(context: EngineContext) {
     * `m`, return `foo` in `foo.bar(m)` TODO: I'm not sure whether `methodRef.methodFullNameExact(...)` uses an index.
     * If not, then caching these lookups or keeping a map of all method names to their references may make sense.
     */
-
-  private def paramToMethodRefCallReceivers(param: MethodParameterIn): List[Expression] =
-    new Cpg(param.graph()).methodRef.methodFullNameExact(param.method.fullName).inCall.argument(0).l
+  private def paramToMethodRefCallReceivers(param: MethodParameterIn): List[Expression] = {
+    val cpg  = new Cpg(param.graph)
+    def trav = cpg.methodRef.methodFullNameExact(param.method.fullName).inCall
+    cpg.metaData.language.headOption match {
+      // Kotlin higher-level functions are often static and don't have the arg0 recv
+      case Some(Languages.KOTLIN) => trav.argument(1).l
+      case _                      => trav.argument(0).l
+    }
+  }
 
   /** Create new tasks from all results that end in an output argument, including return arguments. In this case, we
     * want to traverse to corresponding method output parameters and method return nodes respectively.
@@ -95,49 +109,79 @@ class TaskCreator(context: EngineContext) {
       .distinct
 
     val forCalls = outArgsAndCalls.flatMap { case (result, outArg, path, callDepth) =>
-      val outCall = outArg.collect { case n: Call => n }
+      outArg.toList.flatMap {
+        case call: Call =>
+          val methodReturns = call.toList
+            .flatMap(x => NoResolve.getCalledMethods(x).methodReturn.map(y => (x, y)))
+            .iterator
 
-      val methodReturns = outCall.toList
-        .flatMap(x => NoResolve.getCalledMethods(x).methodReturn.map(y => (x, y)))
-        .to(Traversal)
-
-      methodReturns.flatMap { case (call, methodReturn) =>
-        val method           = methodReturn.method.head
-        val returnStatements = methodReturn._reachingDefIn.toList.collect { case r: Return => r }
-        if (method.isExternal || method.start.isStub.nonEmpty) {
-          val newPath = path
-          (call.receiver.l ++ call.argument.l).map { arg =>
-            val taskStack = result.taskStack :+ TaskFingerprint(arg, result.callSiteStack, callDepth)
-            ReachableByTask(taskStack, newPath)
+          methodReturns.flatMap { case (call, methodReturn) =>
+            val method           = methodReturn.method
+            val returnStatements = methodReturn._reachingDefIn.toList.collect { case r: Return => r }
+            if (method.isExternal || method.start.isStub.nonEmpty) {
+              val newPath = path
+              (call.receiver.l ++ call.argument.l).map { arg =>
+                val taskStack = result.taskStack :+ TaskFingerprint(arg, result.callSiteStack, callDepth)
+                ReachableByTask(taskStack, newPath)
+              }
+            } else {
+              returnStatements.map { returnStatement =>
+                val newPath = Vector(PathElement(methodReturn, result.callSiteStack)) ++ path
+                val taskStack =
+                  result.taskStack :+ TaskFingerprint(returnStatement, call :: result.callSiteStack, callDepth + 1)
+                ReachableByTask(taskStack, newPath)
+              }
+            }
           }
-        } else {
-          returnStatements.map { returnStatement =>
-            val newPath = Vector(PathElement(methodReturn, result.callSiteStack)) ++ path
-            val taskStack =
-              result.taskStack :+ TaskFingerprint(returnStatement, call :: result.callSiteStack, callDepth + 1)
-            ReachableByTask(taskStack, newPath)
-          }
-        }
+        case _ => Vector.empty
       }
     }
 
     val forArgs = outArgsAndCalls.flatMap { case (result, args, path, callDepth) =>
-      args.toList.flatMap { case arg: Expression =>
-        val outParams = if (result.callSiteStack.nonEmpty) {
-          List[MethodParameterOut]()
-        } else {
-          argToOutputParams(arg).l
-        }
-        outParams
-          .filterNot(_.method.isExternal)
-          .map { p =>
-            val newStack = arg.inCall.headOption.map { x => x :: result.callSiteStack }.getOrElse(result.callSiteStack)
-            ReachableByTask(result.taskStack :+ TaskFingerprint(p, newStack, callDepth + 1), path)
+      args.toList.flatMap {
+        case arg: Expression =>
+          val outParams = if (result.callSiteStack.nonEmpty) {
+            List[MethodParameterOut]()
+          } else {
+            argToOutputParams(arg).l
           }
+          outParams
+            .filterNot(_.method.isExternal)
+            .map { p =>
+              val newStack =
+                arg.inCall.headOption.map { x => x :: result.callSiteStack }.getOrElse(result.callSiteStack)
+              ReachableByTask(result.taskStack :+ TaskFingerprint(p, newStack, callDepth + 1), path)
+            }
+        case _ => Vector.empty
       }
     }
 
-    forCalls ++ forArgs
+    val forMethodRefs = outArgsAndCalls.flatMap { case (result, outArg, path, callDepth) =>
+      outArg.toList.flatMap {
+        case methodRef: MethodRef =>
+          val methodReturns = methodRef._refOut.collectAll[Method].methodReturn
+          methodReturns.flatMap { methodReturn =>
+            val returnStatements = methodReturn._reachingDefIn.toList.collect { case r: Return => r }
+            returnStatements.map { returnStatement =>
+              val newPath = Vector(PathElement(methodReturn, result.callSiteStack)) ++ path
+              val taskStack =
+                result.taskStack :+ TaskFingerprint(returnStatement, result.callSiteStack, callDepth + 1)
+              ReachableByTask(taskStack, newPath)
+            }
+          }
+        case _ => Vector.empty
+      }
+    }
+    restrictSize(forCalls) ++ restrictSize(forArgs) ++ restrictSize(forMethodRefs)
+  }
+
+  private def restrictSize(l: Vector[ReachableByTask]): Vector[ReachableByTask] = {
+    if (l.size <= context.config.maxOutputArgsExpansion) {
+      l
+    } else {
+      logger.warn("Too many new tasks in expansion of unresolved output arguments")
+      Vector()
+    }
   }
 
 }

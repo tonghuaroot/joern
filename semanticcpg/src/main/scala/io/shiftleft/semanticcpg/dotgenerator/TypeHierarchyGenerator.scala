@@ -1,9 +1,9 @@
 package io.shiftleft.semanticcpg.dotgenerator
 
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{StoredNode, Type, TypeDecl}
 import io.shiftleft.semanticcpg.dotgenerator.DotSerializer.{Edge, Graph}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 import scala.collection.mutable
 
@@ -11,8 +11,8 @@ class TypeHierarchyGenerator {
 
   def generate(cpg: Cpg): Graph = {
     val subgraph         = mutable.HashMap.empty[String, Seq[StoredNode]]
-    val vertices         = cpg.all.collect { case m: TypeDecl => m }.l
-    val typeToIsExternal = cpg.all.collect { case m: TypeDecl => m }.map { t => t.fullName -> t.isExternal }.toMap
+    val vertices         = cpg.typeDecl.l
+    val typeToIsExternal = vertices.map { t => t.fullName -> t.isExternal }.toMap
     val edges = for {
       srcTypeDecl <- vertices
       srcType     <- srcTypeDecl._typeViaRefIn.l

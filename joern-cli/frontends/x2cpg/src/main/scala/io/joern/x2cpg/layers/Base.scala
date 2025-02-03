@@ -1,10 +1,10 @@
 package io.joern.x2cpg.layers
 
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.PropertyNames
 import io.shiftleft.passes.CpgPassBase
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext, LayerCreatorOptions}
-import io.joern.x2cpg.passes.base._
+import io.joern.x2cpg.passes.base.*
 
 object Base {
   val overlayName: String = "base"
@@ -20,7 +20,8 @@ object Base {
     new MethodDecoratorPass(cpg),
     new AstLinkerPass(cpg),
     new ContainsEdgePass(cpg),
-    new TypeUsagePass(cpg)
+    new TypeRefPass(cpg),
+    new TypeEvalPass(cpg)
   )
 
 }
@@ -29,12 +30,8 @@ class Base extends LayerCreator {
   override val overlayName: String = Base.overlayName
   override val description: String = Base.description
 
-  override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit = {
-    val cpg = context.cpg
-    cpg.graph.indexManager.createNodePropertyIndex(PropertyNames.FULL_NAME)
-    Base.passes(cpg).zipWithIndex.foreach { case (pass, index) =>
-      runPass(pass, context, storeUndoInfo, index)
-    }
+  override def create(context: LayerCreatorContext): Unit = {
+    Base.passes(context.cpg).foreach(_.createAndApply())
   }
 
   // LayerCreators need one-arg constructor, because they're called by reflection from io.joern.console.Run

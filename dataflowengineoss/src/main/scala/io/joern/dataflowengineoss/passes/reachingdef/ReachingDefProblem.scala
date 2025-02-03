@@ -1,9 +1,9 @@
 package io.joern.dataflowengineoss.passes.reachingdef
 
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators}
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.language._
-import io.shiftleft.semanticcpg.utils.MemberAccess.isGenericMemberAccessName
+import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.utils.MemberAccess.{isFieldAccess, isGenericMemberAccessName}
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.{Set, mutable}
@@ -167,7 +167,7 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
   val gen: Map[StoredNode, mutable.BitSet] =
     initGen(method).withDefaultValue(mutable.BitSet())
 
-  val kill: Map[StoredNode, Set[Definition]] =
+  val kill: Map[StoredNode, mutable.BitSet] =
     initKill(method, gen).withDefaultValue(mutable.BitSet())
 
   /** For a given flow graph node `n` and set of definitions, apply the transfer function to obtain the updated set of
@@ -188,19 +188,6 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     // We filter out field accesses to ensure that they propagate
     // taint unharmed.
 
-    def isFieldAccess(name: String): Boolean = {
-      (name == Operators.memberAccess) ||
-      (name == Operators.indirectComputedMemberAccess) ||
-      (name == Operators.indirectMemberAccess) ||
-      (name == Operators.computedMemberAccess) ||
-      (name == Operators.indirection) ||
-      (name == Operators.fieldAccess) ||
-      (name == Operators.indirectFieldAccess) ||
-      (name == Operators.indexAccess) ||
-      (name == Operators.indirectIndexAccess) ||
-      (name == Operators.getElementPtr)
-    }
-
     val defsForCalls = method.call
       .filterNot(x => isFieldAccess(x.name))
       .l
@@ -215,7 +202,7 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
               .collect {
                 case x if nodeToNumber.contains(x) =>
                   Definition.fromNode(x.asInstanceOf[StoredNode], nodeToNumber)
-              }: _*
+              }*
           )
         }
       }
@@ -237,17 +224,13 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     * All operations in our graph are represented by calls and non-operations such as identifiers or field-identifiers
     * have empty gen and kill sets, meaning that they just pass on definitions unaltered.
     */
-  private def initKill(method: Method, gen: Map[StoredNode, Set[Definition]]): Map[StoredNode, Set[Definition]] = {
+  private def initKill(method: Method, gen: Map[StoredNode, mutable.BitSet]): Map[StoredNode, mutable.BitSet] = {
 
     val allIdentifiers: Map[String, List[CfgNode]] = {
-      val results = mutable.Map.empty[String, List[CfgNode]]
-      method.ast
-        .collect {
-          case identifier: Identifier =>
-            (identifier.name, identifier)
-          case methodParameterIn: MethodParameterIn =>
-            (methodParameterIn.name, methodParameterIn)
-        }
+      val results             = mutable.Map.empty[String, List[CfgNode]]
+      val identifierName2Node = method._identifierViaContainsOut.map { identifier => (identifier.name, identifier) }
+      val paramName2Node      = method.parameter.map { parameter => (parameter.name, parameter) }
+      (identifierName2Node ++ paramName2Node)
         .foreach { case (name, node) =>
           val oldValues = results.getOrElse(name, Nil)
           results.put(name, node :: oldValues)
@@ -276,61 +259,64 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     * calculate kill(call) based on gen(call).
     */
   private def killsForGens(
-    genOfCall: Set[Definition],
+    genOfCall: mutable.BitSet,
     allIdentifiers: Map[String, List[CfgNode]],
     allCalls: Map[String, List[Call]]
-  ): Set[Definition] = {
+  ): mutable.BitSet = {
 
-    def definitionsOfSameVariable(definition: Definition): Set[Definition] = {
+    def definitionsOfSameVariable(definition: Definition): Iterator[Definition] = {
       val definedNodes = flowGraph.numberToNode(definition) match {
         case param: MethodParameterIn =>
-          allIdentifiers(param.name)
+          allIdentifiers(param.name).iterator
             .filter(x => x.id != param.id)
         case identifier: Identifier =>
-          val sameIdentifiers = allIdentifiers(identifier.name)
+          val sameIdentifiers = allIdentifiers(identifier.name).iterator
             .filter(x => x.id != identifier.id)
 
           /** Killing an identifier should also kill field accesses on that identifier. For example, a reassignment `x =
             * new Box()` should kill any previous calls to `x.value`, `x.length()`, etc.
             */
-          val sameObjects: Iterable[Call] = allCalls.values.flatten
+          val sameObjects: Iterator[Call] = allCalls.valuesIterator.flatten
             .filter(_.name == Operators.fieldAccess)
             .filter(_.ast.isIdentifier.nameExact(identifier.name).nonEmpty)
 
           sameIdentifiers ++ sameObjects
         case call: Call =>
-          allCalls(call.code)
+          allCalls(call.code).iterator
             .filter(x => x.id != call.id)
-        case _ => Set()
+        case _ => Iterator.empty
       }
       definedNodes
         // It can happen that the CFG is broken and contains isolated nodes,
         // in which case they are not in `nodeToNumber`. Let's filter those.
-        .collect { case x if nodeToNumber.contains(x) => Definition.fromNode(x, nodeToNumber) }.toSet
+        .collect { case x if nodeToNumber.contains(x) => Definition.fromNode(x, nodeToNumber) }
     }
 
-    genOfCall.flatMap { definition =>
-      definitionsOfSameVariable(definition)
+    val res = mutable.BitSet()
+    for (definition <- genOfCall) {
+      res.addAll(definitionsOfSameVariable(definition))
     }
+    res
   }
 
 }
 
 /** Lone Identifier Optimization: we first determine and store all identifiers that neither refer to a local nor a
-  * parameter and that appear only once as a call argument. For these identifiers, we know that they are not used in any
-  * other location in the code, and so, we remove them from `gen` sets so that they need not be propagated through the
-  * entire graph only to determine that they reach the exit node. Instead, when creating reaching definition edges, we
-  * simply create edges from the identifier to the exit node.
+  * parameter and that appear only once as a call argument and not also in a return statement. For these identifiers, we
+  * know that they are not used in any other location in the code, and so, we remove them from `gen` sets so that they
+  * need not be propagated through the entire graph only to determine that they reach the exit node. Instead, when
+  * creating reaching definition edges, we simply create edges from the identifier to the exit node.
   */
 class OptimizedReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     extends ReachingDefTransferFunction(flowGraph) {
 
   lazy val loneIdentifiers: Map[Call, List[Definition]] = {
-    val paramAndLocalNames = method.parameter.name.l ++ method.local.name.l
-
+    val identifiersInReturns = method._returnViaContainsOut.ast.isIdentifier.name.l
+    val paramAndLocalNames   = method.parameter.name.l ++ method.local.name.l
     val callArgPairs = method.call.flatMap { call =>
       call.argument.isIdentifier
         .filterNot(i => paramAndLocalNames.contains(i.name))
+        .filterNot(i => identifiersInReturns.contains(i.name))
         .map(arg => (arg.name, call, arg))
     }.l
 

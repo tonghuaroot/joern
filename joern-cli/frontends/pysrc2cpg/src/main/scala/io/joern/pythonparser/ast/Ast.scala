@@ -3,7 +3,7 @@ package io.joern.pythonparser.ast
 import io.joern.pythonparser.AstVisitor
 
 import java.util
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 // This file describes the AST classes.
 // It tries to stay as close as possible to the AST defined by CPython at
@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters._
 // 1. expr_context is omitted since deriving whether e.g. an attribute is
 //    a "load", "store" or "del" is context sensitive and we do not want
 //    to keep that context during parsing.
-// 2. type_ignore and type_comment are current not populated as comments
+// 2. type_ignore and type_comment are currently not populated as comments
 //    are currently not put in the normal token stream. This could become
 //    a TODO if we need it at some point.
 // 3. We added an ErrorStatement in order to reflect parse errors inline
@@ -68,6 +68,7 @@ case class FunctionDef(
   decorator_list: CollType[iexpr],
   returns: Option[iexpr],
   type_comment: Option[String],
+  type_params: CollType[itypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt {
   def this(
@@ -77,9 +78,19 @@ case class FunctionDef(
     decorator_list: util.ArrayList[iexpr],
     returns: iexpr,
     type_comment: String,
+    type_params: util.ArrayList[itypeParam],
     attributeProvider: AttributeProvider
   ) = {
-    this(name, args, body.asScala, decorator_list.asScala, Option(returns), Option(type_comment), attributeProvider)
+    this(
+      name,
+      args,
+      body.asScala,
+      decorator_list.asScala,
+      Option(returns),
+      Option(type_comment),
+      type_params.asScala,
+      attributeProvider
+    )
   }
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
@@ -93,6 +104,7 @@ case class AsyncFunctionDef(
   decorator_list: CollType[iexpr],
   returns: Option[iexpr],
   type_comment: Option[String],
+  type_params: CollType[itypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt {
   def this(
@@ -102,9 +114,19 @@ case class AsyncFunctionDef(
     decorator_list: util.ArrayList[iexpr],
     returns: iexpr,
     type_comment: String,
+    type_params: util.ArrayList[itypeParam],
     attributeProvider: AttributeProvider
   ) = {
-    this(name, args, body.asScala, decorator_list.asScala, Option(returns), Option(type_comment), attributeProvider)
+    this(
+      name,
+      args,
+      body.asScala,
+      decorator_list.asScala,
+      Option(returns),
+      Option(type_comment),
+      type_params.asScala,
+      attributeProvider
+    )
   }
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
@@ -117,6 +139,7 @@ case class ClassDef(
   keywords: CollType[Keyword],
   body: CollType[istmt],
   decorator_list: CollType[iexpr],
+  type_params: CollType[itypeParam],
   attributeProvider: AttributeProvider
 ) extends istmt {
   def this(
@@ -125,9 +148,18 @@ case class ClassDef(
     keywords: util.ArrayList[Keyword],
     body: util.ArrayList[istmt],
     decorator_list: util.ArrayList[iexpr],
+    type_params: util.ArrayList[itypeParam],
     attributeProvider: AttributeProvider
   ) = {
-    this(name, bases.asScala, keywords.asScala, body.asScala, decorator_list.asScala, attributeProvider)
+    this(
+      name,
+      bases.asScala,
+      keywords.asScala,
+      body.asScala,
+      decorator_list.asScala,
+      type_params.asScala,
+      attributeProvider
+    )
   }
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
@@ -160,6 +192,16 @@ case class Assign(
 ) extends istmt {
   def this(targets: util.ArrayList[iexpr], value: iexpr, attributeProvider: AttributeProvider) = {
     this(targets.asScala, value, None, attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class TypeAlias(name: iexpr, type_params: CollType[itypeParam], value: iexpr, attributeProvider: AttributeProvider)
+    extends istmt {
+  def this(name: iexpr, typeParams: util.ArrayList[itypeParam], value: iexpr, attributeProvider: AttributeProvider) = {
+    this(name, typeParams.asScala, value, attributeProvider)
   }
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
@@ -295,6 +337,15 @@ case class AsyncWith(
     attributeProvider: AttributeProvider
   ) = {
     this(items.asScala, body.asScala, Option(type_comment), attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class Match(subject: iexpr, cases: CollType[MatchCase], attributeProvider: AttributeProvider) extends istmt {
+  def this(subject: iexpr, cases: util.List[MatchCase], attributeProvider: AttributeProvider) = {
+    this(subject, cases.asScala, attributeProvider)
   }
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
@@ -1015,9 +1066,141 @@ case class Withitem(context_expr: iexpr, optional_vars: Option[iexpr]) extends i
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+// AST match_case classes
+///////////////////////////////////////////////////////////////////////////////////////////////////
+case class MatchCase(pattern: ipattern, guard: Option[iexpr], body: CollType[istmt]) extends iast {
+  def this(pattern: ipattern, guard: iexpr, body: util.List[istmt]) = {
+    this(pattern, Option(guard), body.asScala)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// AST pattern classes
+///////////////////////////////////////////////////////////////////////////////////////////////////
+sealed trait ipattern extends iast with iattributes
+
+case class MatchValue(value: iexpr, attributeProvider: AttributeProvider) extends ipattern {
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchSingleton(value: iconstant, attributeProvider: AttributeProvider) extends ipattern {
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchSequence(patterns: CollType[ipattern], attributeProvider: AttributeProvider) extends ipattern {
+  def this(patterns: util.List[ipattern], attributeProvider: AttributeProvider) = {
+    this(patterns.asScala, attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchMapping(
+  keys: CollType[iexpr],
+  patterns: CollType[ipattern],
+  rest: Option[String],
+  attributeProvider: AttributeProvider
+) extends ipattern {
+  def this(
+    keys: util.List[iexpr],
+    patterns: util.List[ipattern],
+    rest: String,
+    attributeProvider: AttributeProvider
+  ) = {
+    this(keys.asScala, patterns.asScala, Option(rest), attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchClass(
+  cls: iexpr,
+  patterns: CollType[ipattern],
+  kwd_attrs: CollType[String],
+  kwd_patterns: CollType[ipattern],
+  attributeProvider: AttributeProvider
+) extends ipattern {
+  def this(
+    cls: iexpr,
+    patterns: util.List[ipattern],
+    kwd_attrs: util.List[String],
+    kwd_patterns: util.List[ipattern],
+    attributeProvider: AttributeProvider
+  ) = {
+    this(cls, patterns.asScala, kwd_attrs.asScala, kwd_patterns.asScala, attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchStar(name: Option[String], attributeProvider: AttributeProvider) extends ipattern {
+  def this(name: String, attributeProvider: AttributeProvider) = {
+    this(Option(name), attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchAs(pattern: Option[ipattern], name: Option[String], attributeProvider: AttributeProvider)
+    extends ipattern {
+  def this(pattern: ipattern, name: String, attributeProvider: AttributeProvider) = {
+    this(Option(pattern), Option(name), attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class MatchOr(patterns: CollType[ipattern], attributeProvider: AttributeProvider) extends ipattern {
+  def this(patterns: util.List[ipattern], attributeProvider: AttributeProvider) = {
+    this(patterns.asScala, attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // AST type_ignore classes
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 case class TypeIgnore(lineno: Int, tag: String) extends iast {
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// AST type_param classes
+///////////////////////////////////////////////////////////////////////////////////////////////////
+trait itypeParam extends iast with iattributes
+
+case class TypeVar(name: String, bound: Option[iexpr], attributeProvider: AttributeProvider) extends itypeParam {
+  def this(name: String, bound: iexpr, attributeProvider: AttributeProvider) = {
+    this(name, Option(bound), attributeProvider)
+  }
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class ParamSpec(name: String, attributeProvider: AttributeProvider) extends itypeParam {
+  override def accept[T](visitor: AstVisitor[T]): T = {
+    visitor.visit(this)
+  }
+}
+
+case class TypeVarTuple(name: String, attributeProvider: AttributeProvider) extends itypeParam {
   override def accept[T](visitor: AstVisitor[T]): T = {
     visitor.visit(this)
   }

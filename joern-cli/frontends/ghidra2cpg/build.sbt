@@ -3,9 +3,9 @@ name := "ghidra2cpg"
 dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
-  "com.github.scopt" %% "scopt"                    % "4.1.0",
-  "commons-io"        % "commons-io"               % "2.11.0",
-  "io.shiftleft"      % "ghidra"                   % "10.1_PUBLIC_20211210a",
+  "io.joern"          % "ghidra"                   % Versions.ghidra,
+  "com.github.scopt" %% "scopt"                    % Versions.scopt,
+  "commons-io"        % "commons-io"               % Versions.commonsIo,
   "io.shiftleft"     %% "codepropertygraph"        % Versions.cpg,
   "io.shiftleft"     %% "codepropertygraph-protos" % Versions.cpg,
   "org.scalatest"    %% "scalatest"                % Versions.scalatest % Test

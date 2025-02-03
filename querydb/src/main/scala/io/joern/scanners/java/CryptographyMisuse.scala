@@ -1,10 +1,10 @@
 package io.joern.scanners.java
 
-import io.joern.scanners._
-import io.shiftleft.semanticcpg.language._
-import io.joern.console._
-import io.joern.macros.QueryMacros._
-import io.joern.dataflowengineoss.language._
+import io.joern.scanners.*
+import io.shiftleft.semanticcpg.language.*
+import io.joern.console.*
+import io.joern.macros.QueryMacros.*
+import io.joern.dataflowengineoss.language.*
 import io.joern.dataflowengineoss.queryengine.EngineContext
 
 /** @see
@@ -32,7 +32,7 @@ object CryptographyMisuse extends QueryBundle {
         def sink =
           cpg.method.fullName("java.security.MessageDigest.getInstance.*").parameter
 
-        sink.reachableBy(source).l
+        sink.reachableBy(source)
       }),
       tags = List(QueryTags.cryptography, QueryTags.default),
       codeExamples = CodeExamples(
@@ -70,7 +70,7 @@ object CryptographyMisuse extends QueryBundle {
         def sink =
           cpg.method.fullName("javax.crypto.spec.PBEKeySpec.<init>.*").parameter
 
-        sink.reachableBy(source).dedup.filter(f => Integer.parseInt(f.code) < 1000).l
+        sink.reachableBy(source).dedup.filter(f => Integer.parseInt(f.code) < 1000)
       }),
       tags = List(QueryTags.cryptography, QueryTags.default),
       codeExamples = CodeExamples(

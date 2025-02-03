@@ -1,28 +1,29 @@
 package io.joern.joerncli
 
-import better.files.Dsl._
+import better.files.Dsl.*
 import better.files.File
+import flatgraph.{Accessors, Edge, GNode}
+import flatgraph.formats.ExportResult
+import flatgraph.formats.dot.DotExporter
+import flatgraph.formats.graphml.GraphMLExporter
+import flatgraph.formats.graphson.GraphSONExporter
+import flatgraph.formats.neo4jcsv.Neo4jCsvExporter
 import io.joern.dataflowengineoss.DefaultSemantics
-import io.joern.dataflowengineoss.layers.dataflows._
-import io.joern.dataflowengineoss.semanticsloader.Semantics
+import io.joern.dataflowengineoss.layers.dataflows.*
+import io.joern.dataflowengineoss.semanticsloader.{NoSemantics, Semantics}
 import io.joern.joerncli.CpgBasedTool.exitIfInvalid
-import io.joern.x2cpg.layers._
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.semanticcpg.language.{toAstNodeMethods, toNodeTypeStarters}
-import io.shiftleft.semanticcpg.layers._
-import overflowdb.formats.ExportResult
-import overflowdb.formats.dot.DotExporter
-import overflowdb.formats.graphml.GraphMLExporter
-import overflowdb.formats.graphson.GraphSONExporter
-import overflowdb.formats.neo4jcsv.Neo4jCsvExporter
-import overflowdb.{Edge, Node}
+import io.joern.x2cpg.layers.*
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.generated.NodeTypes
+import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.semanticcpg.layers.*
 
 import java.nio.file.{Path, Paths}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 import scala.util.Using
 
-object JoernExport extends App {
+object JoernExport {
 
   case class Config(
     cpgFileName: String = "cpg.bin",
@@ -57,7 +58,19 @@ object JoernExport extends App {
       byNameLowercase.getOrElse(s, throw new NoSuchElementException(s"No value found for '$s'"))
   }
 
-  private def parseConfig: Option[Config] =
+  def main(args: Array[String]): Unit = {
+    parseConfig(args).foreach { config =>
+      val outDir = config.outDir
+      exitIfInvalid(outDir, config.cpgFileName)
+      mkdir(File(outDir))
+
+      Using.resource(CpgBasedTool.loadFromFile(config.cpgFileName)) { cpg =>
+        exportCpg(cpg, config.repr, config.format, Paths.get(outDir).toAbsolutePath)
+      }
+    }
+  }
+
+  private def parseConfig(args: Array[String]): Option[Config] = {
     new scopt.OptionParser[Config]("joern-export") {
       head("Dump intermediate graph representations (or entire graph) of code in a given export format")
       help("help")
@@ -79,21 +92,11 @@ object JoernExport extends App {
           s"export format, one of [${Format.values.toSeq.map(_.toString.toLowerCase).sorted.mkString("|")}] - defaults to `${Format.Dot}`"
         )
     }.parse(args, Config())
-
-  parseConfig.foreach { config =>
-    val repr   = config.repr
-    val outDir = config.outDir
-    exitIfInvalid(outDir, config.cpgFileName)
-    mkdir(File(outDir))
-
-    Using.resource(CpgBasedTool.loadFromOdb(config.cpgFileName)) { cpg =>
-      exportCpg(cpg, config.repr, config.format, Paths.get(outDir).toAbsolutePath)
-    }
   }
 
   def exportCpg(cpg: Cpg, representation: Representation.Value, format: Format.Value, outDir: Path): Unit = {
     implicit val semantics: Semantics = DefaultSemantics()
-    if (semantics.elements.isEmpty) {
+    if (semantics == NoSemantics) {
       System.err.println("Warning: semantics are empty.")
     }
 
@@ -102,17 +105,18 @@ object JoernExport extends App {
 
     format match {
       case Format.Dot if representation == Representation.All || representation == Representation.Cpg =>
-        exportWithOdbFormat(cpg, representation, outDir, DotExporter)
+        exportWithFlatgraphFormat(cpg, representation, outDir, DotExporter)
       case Format.Dot =>
         exportDot(representation, outDir, context)
       case Format.Neo4jCsv =>
-        exportWithOdbFormat(cpg, representation, outDir, Neo4jCsvExporter)
+        exportWithFlatgraphFormat(cpg, representation, outDir, Neo4jCsvExporter)
       case Format.Graphml =>
-        exportWithOdbFormat(cpg, representation, outDir, GraphMLExporter)
+        exportWithFlatgraphFormat(cpg, representation, outDir, GraphMLExporter)
       case Format.Graphson =>
-        exportWithOdbFormat(cpg, representation, outDir, GraphSONExporter)
+        exportWithFlatgraphFormat(cpg, representation, outDir, GraphSONExporter)
+      case other =>
+        throw new NotImplementedError(s"repr=$representation not yet supported for format=$format")
     }
-
   }
 
   private def exportDot(repr: Representation.Value, outDir: Path, context: LayerCreatorContext): Unit = {
@@ -125,32 +129,39 @@ object JoernExport extends App {
       case Cdg   => new DumpCdg(CdgDumpOptions(outDirStr)).create(context)
       case Pdg   => new DumpPdg(PdgDumpOptions(outDirStr)).create(context)
       case Cpg14 => new DumpCpg14(Cpg14DumpOptions(outDirStr)).create(context)
+      case other => throw new NotImplementedError(s"repr=$repr not yet supported for this format")
     }
   }
 
-  private def exportWithOdbFormat(
+  private def exportWithFlatgraphFormat(
     cpg: Cpg,
     repr: Representation.Value,
     outDir: Path,
-    exporter: overflowdb.formats.Exporter
+    exporter: flatgraph.formats.Exporter
   ): Unit = {
     val ExportResult(nodeCount, edgeCount, _, additionalInfo) = repr match {
       case Representation.All =>
         exporter.runExport(cpg.graph, outDir)
       case Representation.Cpg =>
-        val windowsFilenameDeduplicationHelper = mutable.Set.empty[String]
-        splitByMethod(cpg).iterator
-          .map { case subGraph @ MethodSubGraph(methodName, methodFilename, nodes) =>
-            val relativeFilename = sanitizedFileName(
-              methodName,
-              methodFilename,
-              exporter.defaultFileExtension,
-              windowsFilenameDeduplicationHelper
-            )
-            val outFileName = outDir.resolve(relativeFilename)
-            exporter.runExport(nodes, subGraph.edges, outFileName)
-          }
-          .reduce(plus)
+        if (cpg.graph.nodeCount(NodeTypes.METHOD) > 0) {
+          val windowsFilenameDeduplicationHelper = mutable.Set.empty[String]
+          splitByMethod(cpg).iterator
+            .map { case subGraph @ MethodSubGraph(methodName, methodFilename, nodes) =>
+              val relativeFilename = sanitizedFileName(
+                methodName,
+                methodFilename,
+                exporter.defaultFileExtension,
+                windowsFilenameDeduplicationHelper
+              )
+              val outFileName = outDir.resolve(relativeFilename)
+              exporter.runExport(cpg.graph.schema, nodes, subGraph.edges, outFileName)
+            }
+            .reduce(plus)
+        } else {
+          emptyExportResult
+        }
+      case other =>
+        throw new NotImplementedError(s"repr=$repr not yet supported for this format")
     }
 
     println(s"exported $nodeCount nodes, $edgeCount edges into $outDir")
@@ -207,12 +218,14 @@ object JoernExport extends App {
     )
   }
 
-  case class MethodSubGraph(methodName: String, methodFilename: String, nodes: Set[Node]) {
+  private def emptyExportResult = ExportResult(0, 0, Seq.empty, Option("Empty CPG"))
+
+  case class MethodSubGraph(methodName: String, methodFilename: String, nodes: Set[GNode]) {
     def edges: Set[Edge] = {
       for {
         node <- nodes
-        edge <- node.bothE.asScala
-        if nodes.contains(edge.inNode) && nodes.contains(edge.outNode)
+        edge <- Accessors.getEdgesOut(node)
+        if nodes.contains(edge.dst)
       } yield edge
     }
   }

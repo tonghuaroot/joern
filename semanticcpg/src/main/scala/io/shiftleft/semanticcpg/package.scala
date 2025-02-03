@@ -1,5 +1,7 @@
 package io.shiftleft
 
+import flatgraph.help.Table.AvailableWidthProvider
+
 /** Domain specific language for querying code property graphs
   *
   * This is the API reference for the CPG query language, a language to mine code for defects and vulnerabilities both
@@ -21,7 +23,7 @@ package io.shiftleft
   * {{{cpg.local}}}
   *
   * will start at all local variables. The complete list of starting points can be found at
-  * {{{io.shiftleft.codepropertygraph.Cpg}}}
+  * {{{io.shiftleft.codepropertygraph.generated.Cpg}}}
   *
   * ==Lazy evaluation==
   * Queries are lazily evaluated, e.g., `cpg.method` creates a traversal which you can add more steps to. You can, for
@@ -85,4 +87,10 @@ package io.shiftleft
   *   query.toList
   * }}}
   */
-package object semanticcpg {}
+
+package object semanticcpg {
+
+  implicit val defaultAvailableWidthProvider: AvailableWidthProvider =
+    () => replpp.util.terminalWidth.filter(_ > 0).getOrElse(120)
+
+}

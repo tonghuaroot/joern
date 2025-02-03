@@ -1,14 +1,13 @@
 package io.joern.scanners.c
 
+import io.joern.console.*
+import io.joern.dataflowengineoss.language.*
+import io.joern.dataflowengineoss.queryengine.EngineContext
+import io.joern.macros.QueryMacros.*
 import io.joern.scanners.{Crew, QueryTags}
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.joern.console._
-import io.shiftleft.semanticcpg.language._
-import io.joern.dataflowengineoss.language._
-import io.joern.dataflowengineoss.queryengine.EngineContext
-import io.joern.macros.QueryMacros._
-import overflowdb.traversal.Traversal
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 
 object UseAfterFree extends QueryBundle {
 
@@ -200,7 +199,7 @@ object UseAfterFree extends QueryBundle {
             val assignedPostDom = postDom.isIdentifier
               .where(_.inAssignment)
               .codeExact(freedIdentifierCode)
-              .flatMap(id => Traversal.fromSingle(id) ++ id.postDominatedBy)
+              .flatMap(id => Iterator.single(id) ++ id.postDominatedBy)
 
             postDom
               .removedAll(assignedPostDom)
@@ -237,7 +236,7 @@ object UseAfterFree extends QueryBundle {
           |  if (cond) {
           |    free(x);
           |    if (cond2)
-          |      return x; // not post-dominated by free call
+          |      return x; // doesn't post-dominate the free call
           |    x = NULL;
           |  }
           |  return x;

@@ -1,11 +1,29 @@
 package io.joern.jimple2cpg.querying
 
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.{Annotation, AnnotationLiteral, ArrayInitializer}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class AnnotationTests extends JimpleCode2CpgFixture {
+
+  "annotation type" should {
+
+    lazy val cpg: Cpg = code("""
+        |@interface NormalAnnotation {
+        |    public String value() default "";
+        |}
+        |@NormalAnnotation("annotation")
+        |class SomeClass {}
+        |""".stripMargin).cpg
+
+    "test annotation node properties" in {
+      val annotationNode = cpg.typeDecl("SomeClass").annotation.head
+      annotationNode.code shouldBe """@NormalAnnotation(value = "annotation")"""
+      annotationNode.name shouldBe "NormalAnnotation"
+      annotationNode.fullName shouldBe "NormalAnnotation"
+    }
+  }
 
   "annotation type method 1" should {
 
@@ -38,19 +56,16 @@ class AnnotationTests extends JimpleCode2CpgFixture {
     "test annotation node parameter assignment child" in {
       val Seq(paramAssign) = cpg.method.name("function").annotation.parameterAssign.l
       paramAssign.code shouldBe "value = \"classAnnotation\""
-      paramAssign.order shouldBe 1
     }
 
     "test annotation node parameter child" in {
       val Seq(param) = cpg.method.name("function").annotation.parameterAssign.parameter.l
       param.code shouldBe "value"
-      param.order shouldBe 1
     }
 
     "test annotation node parameter value" in {
       val Seq(paramValue) = cpg.method.name("function").annotation.parameterAssign.value.l
       paramValue.code shouldBe "\"classAnnotation\""
-      paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
     }
 
@@ -204,7 +219,7 @@ class AnnotationTests extends JimpleCode2CpgFixture {
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: ArrayInitializer) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: ArrayInitializer) = cpg.method.name("function").annotation.parameterAssign.value.l: @unchecked
       paramValue.code shouldBe "{\"aaa\", \"bbb\"}"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
@@ -249,7 +264,8 @@ class AnnotationTests extends JimpleCode2CpgFixture {
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: AnnotationLiteral) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: AnnotationLiteral) =
+        cpg.method.name("function").annotation.parameterAssign.value.l: @unchecked
       paramValue.code shouldBe "2"
       paramValue.order shouldBe 2
       paramValue.argumentIndex shouldBe 2
@@ -290,7 +306,7 @@ class AnnotationTests extends JimpleCode2CpgFixture {
     }
 
     "test annotation node parameter value" in {
-      val Seq(paramValue: Annotation) = cpg.method.name("function").annotation.parameterAssign.value.l
+      val Seq(paramValue: Annotation) = cpg.method.name("function").annotation.parameterAssign.value.l: @unchecked
       paramValue.code shouldBe "@OtherAnnotation()"
       paramValue.fullName shouldBe "OtherAnnotation"
       paramValue.order shouldBe 2

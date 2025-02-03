@@ -1,10 +1,24 @@
 package io.joern.c2cpg.passes.types
 
-import io.joern.c2cpg.testfixtures.CCodeToCpgSuite
+import io.joern.c2cpg.testfixtures.C2CpgSuite
 import io.shiftleft.codepropertygraph.generated.Operators
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
-class StructTypeTests extends CCodeToCpgSuite {
+class StructTypeTests extends C2CpgSuite {
+
+  "Typedef struct with member" should {
+    val cpg = code("""
+        |typedef struct {
+        |  uint32_t bar;
+        |} Foo;
+        |""".stripMargin)
+
+    "contain correct fields for all members" in {
+      val List(typeDeclNode) = cpg.typeDecl.nameExact("Foo").l
+      typeDeclNode.member.name.toSetImmutable shouldBe Set("bar")
+      typeDeclNode.member.typ.fullName.toSetImmutable shouldBe Set("uint32_t")
+    }
+  }
 
   "Struct with array members" should {
     val cpg = code("""
@@ -34,7 +48,7 @@ class StructTypeTests extends CCodeToCpgSuite {
       val List(argBInit) = bInitCall.argument.l
       argBInit.code shouldBe "SIZE - 1"
       val List(subtractionCall) = bInitCall.ast.isCall.nameExact(Operators.subtraction).l
-      subtractionCall.code shouldBe "5 - 1"
+      subtractionCall.code shouldBe "SIZE - 1"
 
       cInitCall.code shouldBe "c[10]"
       val List(argCInit) = cInitCall.argument.l

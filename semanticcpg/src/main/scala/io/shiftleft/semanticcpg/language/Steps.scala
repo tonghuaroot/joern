@@ -1,20 +1,21 @@
 package io.shiftleft.semanticcpg.language
 
-import io.shiftleft.codepropertygraph.generated.nodes.StoredNode
+import io.shiftleft.codepropertygraph.generated.nodes.{AbstractNode, StoredNode}
 import org.json4s.native.Serialization.{write, writePretty}
-import org.json4s.{CustomSerializer, Extraction}
-import org.json4s.Formats
-import overflowdb.traversal._
-import overflowdb.traversal.help.Doc
+import org.json4s.{CustomSerializer, Extraction, Formats}
+import io.shiftleft.codepropertygraph.generated.help.{Doc, Traversal}
+import replpp.Colors
+import replpp.Operators.*
 
-import java.util.{List => JList}
+import java.util.List as JList
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Base class for our DSL These are the base steps available in all steps of the query language. There are no
   * constraints on the element types, unlike e.g. [[NodeSteps]]
   */
-class Steps[A](val traversal: Traversal[A]) extends AnyVal {
+@Traversal(elementType = classOf[AnyRef])
+class Steps[A](val traversal: Iterator[A]) extends AnyVal {
 
   /** Execute the traversal and convert it to a mutable buffer
     */
@@ -50,6 +51,13 @@ class Steps[A](val traversal: Traversal[A]) extends AnyVal {
   def p(implicit show: Show[A] = Show.default): List[String] =
     traversal.toList.map(show.apply)
 
+  @Doc(info = "execute this traversal and show the pretty-printed results in `less`")
+  // uses scala-repl-pp's `#|^` operator which let's `less` inherit stdin and stdout
+  def browse: Unit = {
+    given Colors = Colors.Default
+    traversal #|^ "less"
+  }
+
   /** Execute traversal and convert the result to json. `toJson` (export) contains the exact same information as
     * `toList`, only in json format. Typically, the user will call this method upon inspection of the results of
     * `toList` in order to export the data for processing with other tools.
@@ -72,16 +80,21 @@ class Steps[A](val traversal: Traversal[A]) extends AnyVal {
 }
 
 object Steps {
-  private lazy val nodeSerializer = new CustomSerializer[StoredNode](implicit format =>
+  private lazy val nodeSerializer = new CustomSerializer[AbstractNode](implicit format =>
     (
-      { case _ => ??? },
-      { case node: StoredNode =>
-        val elementMap = (0 until node.productArity).map { i =>
+      { case _ => ??? }, // deserializer not required for now
+      { case node: AbstractNode =>
+        val elementMap = Map.newBuilder[String, Any]
+        (0 until node.productArity).foreach { i =>
           val label   = node.productElementName(i)
           val element = node.productElement(i)
-          label -> element
-        }.toMap + ("_label" -> node.label)
-        Extraction.decompose(elementMap)
+          elementMap.addOne(label -> element)
+        }
+        elementMap.addOne("_label" -> node.label)
+        if (node.isInstanceOf[StoredNode]) {
+          elementMap.addOne("_id" -> node.asInstanceOf[StoredNode].id())
+        }
+        Extraction.decompose(elementMap.result())
       }
     )
   )

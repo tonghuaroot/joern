@@ -3,7 +3,7 @@ package io.joern.kotlin2cpg.querying
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Literal, Local}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
 
@@ -52,7 +52,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       firstDestructRHSCall.typeFullName shouldBe "java.lang.String"
 
       val List(firstDestructRHSCallArgument: Identifier) =
-        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       firstDestructRHSCallArgument.argumentIndex shouldBe 0
       firstDestructRHSCallArgument.code shouldBe "aClass"
       firstDestructRHSCallArgument.name shouldBe "aClass"
@@ -74,7 +74,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       secondDestructRHSCall.typeFullName shouldBe "int"
 
       val List(secondDestructRHSCallArgument: Identifier) =
-        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       secondDestructRHSCallArgument.argumentIndex shouldBe 0
       secondDestructRHSCallArgument.code shouldBe "aClass"
       secondDestructRHSCallArgument.typeFullName shouldBe "main.AClass"
@@ -107,6 +107,18 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
     }
   }
 
+  /*
+   _______ example lowering _________
+  | -> val (one, two) = Person("a", "b")
+  | -> LOCAL one
+  | -> LOCAL two
+  | -> LOCAL tmp
+  | -> tmp = alloc
+  | -> tmp.<init>
+  | -> CALL one = tmp.component1()
+  | -> CALL two = tmp.component2()
+  |__________________________________
+   */
   "CPG for code with destructuring expression with a ctor-invocation RHS" should {
     val cpg = code("""
         |package main
@@ -143,7 +155,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       tmpAssignmentToAlloc.typeFullName shouldBe "ANY"
       tmpAssignmentToAlloc.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
 
-      val List(allocAssignmentLhs: Identifier, allocAssignmentRhs: Call) = tmpAssignmentToAlloc.argument.l
+      val List(allocAssignmentLhs: Identifier, allocAssignmentRhs: Call) = tmpAssignmentToAlloc.argument.l: @unchecked
       allocAssignmentLhs.argumentIndex shouldBe 1
       allocAssignmentLhs.code shouldBe "tmp_1"
       allocAssignmentLhs.typeFullName shouldBe "main.AClass"
@@ -163,7 +175,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       tmpInitCall.argument.code.l shouldBe List("tmp_1", "aMessage", "41414141")
 
       val List(initCallFirstArg: Identifier, initCallSecondArg: Identifier, initCallThirdArg: Literal) =
-        tmpInitCall.argument.l
+        tmpInitCall.argument.l: @unchecked
       initCallFirstArg.code shouldBe "tmp_1"
       initCallFirstArg.typeFullName shouldBe "main.AClass"
       initCallFirstArg.argumentIndex shouldBe 0
@@ -197,7 +209,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       firstDestructRHSCall.typeFullName shouldBe "java.lang.String"
 
       val List(firstDestructRHSCallArgument: Identifier) =
-        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       firstDestructRHSCallArgument.argumentIndex shouldBe 0
       firstDestructRHSCallArgument.code should startWith("tmp_")
       firstDestructRHSCallArgument.typeFullName shouldBe "main.AClass"
@@ -220,7 +232,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       secondDestructRHSCall.typeFullName shouldBe "int"
 
       val List(secondDestructRHSCallArgument: Identifier) =
-        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       secondDestructRHSCallArgument.argumentIndex shouldBe 0
       secondDestructRHSCallArgument.code should startWith("tmp_")
       secondDestructRHSCallArgument.typeFullName shouldBe "main.AClass"
@@ -295,7 +307,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       tmpAssignmentToRhsCall.typeFullName shouldBe "ANY"
       tmpAssignmentToRhsCall.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
 
-      val List(allocAssignmentLhs: Identifier, rhsCall: Call) = tmpAssignmentToRhsCall.argument.l
+      val List(allocAssignmentLhs: Identifier, rhsCall: Call) = tmpAssignmentToRhsCall.argument.l: @unchecked
       allocAssignmentLhs.argumentIndex shouldBe 1
       allocAssignmentLhs.code shouldBe "tmp_1"
       allocAssignmentLhs.typeFullName shouldBe "mypkg.AClass"
@@ -310,7 +322,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       rhsCall.argumentIndex shouldBe 2
 
       rhsCall.argument.size shouldBe 1
-      val List(rhsCallFirstArg: Identifier) = rhsCall.argument.l
+      val List(rhsCallFirstArg: Identifier) = rhsCall.argument.l: @unchecked
       rhsCallFirstArg.argumentIndex shouldBe 1
       rhsCallFirstArg.code shouldBe "aMessage"
       rhsCallFirstArg.typeFullName shouldBe "java.lang.String"
@@ -332,7 +344,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       firstDestructRHSCall.typeFullName shouldBe "java.lang.String"
 
       val List(firstDestructRHSCallArgument: Identifier) =
-        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       firstDestructRHSCallArgument.argumentIndex shouldBe 0
       firstDestructRHSCallArgument.code should startWith("tmp_")
       firstDestructRHSCallArgument.typeFullName shouldBe "mypkg.AClass"
@@ -355,7 +367,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       secondDestructRHSCall.typeFullName shouldBe "int"
 
       val List(secondDestructRHSCallArgument: Identifier) =
-        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       secondDestructRHSCallArgument.argumentIndex shouldBe 0
       secondDestructRHSCallArgument.code should startWith("tmp_")
       secondDestructRHSCallArgument.typeFullName shouldBe "mypkg.AClass"
@@ -394,6 +406,17 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
     }
   }
 
+  /*
+   _______ example lowering _________
+  | -> val (one, two) = makeA("AMESSAGE")
+  | -> LOCAL one
+  | -> LOCAL two
+  | -> LOCAL tmp
+  | -> tmp = makeA("AMESSAGE")
+  | -> CALL one = tmp.component1()
+  | -> CALL two = tmp.component2()
+  |__________________________________
+   */
   "CPG for code with destructuring expression with a DQE call RHS" should {
     val cpg = code("""
         |package mypkg
@@ -444,7 +467,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       tmpAssignmentToRhsCall.typeFullName shouldBe "ANY"
       tmpAssignmentToRhsCall.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
 
-      val List(allocAssignmentLhs: Identifier, rhsCall: Call) = tmpAssignmentToRhsCall.argument.l
+      val List(allocAssignmentLhs: Identifier, rhsCall: Call) = tmpAssignmentToRhsCall.argument.l: @unchecked
       allocAssignmentLhs.argumentIndex shouldBe 1
       allocAssignmentLhs.code shouldBe "tmp_1"
       allocAssignmentLhs.typeFullName shouldBe "mypkg.AClass"
@@ -459,7 +482,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       rhsCall.argumentIndex shouldBe 2
       rhsCall.argument.size shouldBe 2
 
-      val List(rhsCallFirstArg: Identifier, rhsCallSecondArg: Identifier) = rhsCall.argument.l
+      val List(rhsCallFirstArg: Identifier, rhsCallSecondArg: Identifier) = rhsCall.argument.l: @unchecked
       rhsCallFirstArg.argumentIndex shouldBe 0
       rhsCallFirstArg.code shouldBe "aFactory"
       rhsCallFirstArg.typeFullName shouldBe "mypkg.AFactory"
@@ -484,7 +507,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       firstDestructRHSCall.typeFullName shouldBe "java.lang.String"
 
       val List(firstDestructRHSCallArgument: Identifier) =
-        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        firstDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       firstDestructRHSCallArgument.argumentIndex shouldBe 0
       firstDestructRHSCallArgument.code should startWith("tmp_")
       firstDestructRHSCallArgument.typeFullName shouldBe "mypkg.AClass"
@@ -507,7 +530,7 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       secondDestructRHSCall.typeFullName shouldBe "int"
 
       val List(secondDestructRHSCallArgument: Identifier) =
-        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l
+        secondDestructAssignment.argument(2).asInstanceOf[Call].argument.l: @unchecked
       secondDestructRHSCallArgument.argumentIndex shouldBe 0
       secondDestructRHSCallArgument.code should startWith("tmp_")
       secondDestructRHSCallArgument.typeFullName shouldBe "mypkg.AClass"
@@ -549,4 +572,82 @@ class DestructuringTests extends KotlinCode2CpgFixture(withOssDataflow = false) 
       cpg.local.codeNot(".*tmp.*").code(".*_.*").size shouldBe 0
     }
   }
+
+  "CPG for code with destructuring expression with an array access call RHS" should {
+    val cpg = code("""
+        |package mypkg
+        |fun f1() {
+        |    data class Entry(val p: String, val q: String)
+        |    val l = listOf(Entry("one", "two"), Entry("three", "four"))
+        |    val (p, q) = l[1]
+        |    println(p)
+        |    println(q)
+        |}
+        |""".stripMargin)
+
+    "should contain an `indexAccess` CALL node for the RHS" in {
+      val List(c: Call) = cpg.call.codeExact("l[1]").l
+      c.methodFullName shouldBe Operators.indexAccess
+    }
+  }
+
+  "CPG for code with destructuring expression with a postfix expression RHS" should {
+    val cpg = code("""
+        |package mypkg
+        |fun x98() {
+        |    data class Entry(val p: String, val q: String)
+        |    val mrr = mapOf("one" to Entry("p1", "q1"), "two" to Entry("p2", "q2"))
+        |    val (p, q) = mrr.get("one")!!
+        |    println(p)
+        |    println(q)
+        |}
+        |""".stripMargin)
+
+    "should contain an `notNullAssert` CALL node for the RHS" in {
+      val List(c: Call) = cpg.call.codeExact("mrr.get(\"one\")!!").l
+      c.methodFullName shouldBe Operators.notNullAssert
+    }
+  }
+
+  "CPG for code with destructuring expression with a _when_ expression RHS" should {
+    val cpg = code("""
+        |package mypkg
+        |fun f1() {
+        |    data class Entry(val p: String, val q: String)
+        |    val (p, q) =
+        |        when(Random(1).nextInt()) {
+        |            1 -> Entry("p1", "q1")
+        |            else -> Entry("pelse", "qelse")
+        |        }
+        |}
+        |""".stripMargin)
+
+    "should contain an `when`-operator CALL node for the RHS" in {
+      val List(c: Call) = cpg.call.methodFullName("<operator>.when").l
+      c.methodFullName shouldBe "<operator>.when"
+    }
+  }
+
+  "CPG for code with destructuring expression with an _if_ expression RHS" should {
+    val cpg = code("""
+      |package mypkg
+      |import kotlin.random.Random
+      |fun f1() {
+      |    data class Entry(val p: String, val q: String)
+      |    val (p, q) =
+      |        if (Random(1).nextBoolean()) {
+      |            Entry("onep", "oneq")
+      |        } else {
+      |            Entry("twop", "twoq")
+      |        }
+      |    println(p)
+      |    println(q)
+      |}
+      |""".stripMargin)
+
+    "should contain a `conditional`-operator CALL node for the RHS" in {
+      cpg.call.methodFullName("<operator>.conditional").size shouldBe 1
+    }
+  }
+
 }

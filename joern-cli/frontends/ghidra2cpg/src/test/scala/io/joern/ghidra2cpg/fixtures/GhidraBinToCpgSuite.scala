@@ -1,13 +1,13 @@
 package io.joern.ghidra2cpg.fixtures
 
 import io.joern.ghidra2cpg.{Config, Ghidra2Cpg}
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.joern.x2cpg.testfixtures.LanguageFrontend
 import io.shiftleft.utils.ProjectRoot
 import org.apache.commons.io.FileUtils
 import io.shiftleft.codepropertygraph.generated.nodes
-import io.joern.dataflowengineoss.language._
-import io.shiftleft.semanticcpg.language._
+import io.joern.dataflowengineoss.language.*
+import io.shiftleft.semanticcpg.language.*
 
 import java.nio.file.Files
 
@@ -16,10 +16,14 @@ class GhidraFrontend extends LanguageFrontend {
 
   override def execute(inputFile: java.io.File): Cpg = {
     val dir = Files.createTempDirectory("ghidra2cpg-tests").toFile
-    Runtime.getRuntime.addShutdownHook(new Thread(() => FileUtils.deleteQuietly(dir)))
+    Runtime.getRuntime.addShutdownHook(new Thread(new Runnable {
+      override def run(): Unit = FileUtils.deleteQuietly(dir)
+    }))
 
     val tempDir = Files.createTempDirectory("ghidra2cpg").toFile
-    Runtime.getRuntime.addShutdownHook(new Thread(() => FileUtils.deleteQuietly(tempDir)))
+    Runtime.getRuntime.addShutdownHook(new Thread(new Runnable {
+      override def run(): Unit = FileUtils.deleteQuietly(tempDir)
+    }))
 
     val cpgBin                         = dir.getAbsolutePath
     implicit val defaultConfig: Config = Config()

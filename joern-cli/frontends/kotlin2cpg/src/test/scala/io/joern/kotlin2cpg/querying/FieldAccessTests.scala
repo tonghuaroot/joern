@@ -3,7 +3,7 @@ package io.joern.kotlin2cpg.querying
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.{FieldIdentifier, Identifier}
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class FieldAccessTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
 
@@ -35,7 +35,7 @@ class FieldAccessTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
 
     "should contain a CALL node for the _fieldAccess_ expression with the correct arguments set" in {
       val List(oneArg: Identifier, anotherArg: FieldIdentifier) =
-        cpg.call.methodFullNameExact(Operators.assignment).code("a.m.*").argument(1).isCall.argument.l
+        cpg.call.methodFullNameExact(Operators.assignment).code("a.m.*").argument(1).isCall.argument.l: @unchecked
 
       oneArg.argumentIndex shouldBe 1
       oneArg.code shouldBe "a"

@@ -1,13 +1,14 @@
 name := "dataflowengineoss"
 
-crossScalaVersions := Seq("2.13.8", "3.2.2")
-
-dependsOn(Projects.semanticcpg, Projects.x2cpg)
+dependsOn(Projects.semanticcpg, Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
+  "org.antlr"               % "antlr4"                     % Versions.antlr,
   "org.antlr"               % "antlr4-runtime"             % Versions.antlr,
+  "com.lihaoyi"            %% "upickle"                    % Versions.upickle,
+  "com.lihaoyi"            %% "ujson"                      % Versions.upickle,
   "org.scalatest"          %% "scalatest"                  % Versions.scalatest % Test,
-  "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
+  "org.scala-lang.modules" %% "scala-parallel-collections" % Versions.scalaParallel
 )
 
 enablePlugins(Antlr4Plugin)

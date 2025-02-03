@@ -2,7 +2,7 @@ package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.Literal
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class EnumTests extends JavaSrcCode2CpgFixture {
   val cpg = code("""
@@ -23,6 +23,10 @@ class EnumTests extends JavaSrcCode2CpgFixture {
       |  }
       |}
       |""".stripMargin)
+
+  "the enum type should extends java.lang.Enum" in {
+    cpg.typeDecl.name("FuzzyBool").inheritsFromTypeFullName.l shouldBe List("java.lang.Enum")
+  }
 
   "it should parse a basic enum without values" in {
     inside(cpg.typeDecl.name(".*FuzzyBool.*").l) { case List(typeDecl) =>
@@ -59,20 +63,12 @@ class EnumTests extends JavaSrcCode2CpgFixture {
     cpg.typeDecl.name(".*Color.*").member.size shouldBe 3
     val List(r, b, l) = cpg.typeDecl.name(".*Color.*").member.l
 
-    l.code shouldBe "java.lang.String label"
+    l.code shouldBe "String label"
 
     r.code shouldBe "RED(\"Red\")"
-    r.astChildren.isCall.size shouldBe 1
-    val call = r.astChildren.isCall.head
-    call.name shouldBe s"Color.${io.joern.x2cpg.Defines.ConstructorMethodName}"
-    call.methodFullName shouldBe s"Color.${io.joern.x2cpg.Defines.ConstructorMethodName}"
-    call.order shouldBe 1
-    call.astChildren.size shouldBe 1
-    call.astChildren.head shouldBe a[Literal]
-    call.astChildren.head.code shouldBe "\"Red\""
+    r.astChildren.size shouldBe 0
 
     b.code shouldBe "BLUE(\"Blue\")"
-    b.astChildren.astChildren.size shouldBe 1
-    b.astChildren.astChildren.head.code shouldBe "\"Blue\""
+    b.astChildren.astChildren.size shouldBe 0
   }
 }

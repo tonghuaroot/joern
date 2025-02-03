@@ -1,15 +1,15 @@
 package io.shiftleft.semanticcpg.language
 
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.Cpg.docSearchPackages
-import io.shiftleft.codepropertygraph.generated.nodes._
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.{NodeTypes, Properties}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.testing.MockCpg
-import org.json4s._
+import flatgraph.help.Table.{AvailableWidthProvider, ConstantWidth}
+import org.json4s.*
 import org.json4s.native.JsonMethods.parse
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import overflowdb.traversal.Traversal
 
 class StepsTest extends AnyWordSpec with Matchers {
 
@@ -39,7 +39,7 @@ class StepsTest extends AnyWordSpec with Matchers {
 
     "filter with traversal on cpg type" in {
       def allMethods    = cpg.method.l
-      val publicMethods = allMethods.to(Traversal).where(_.isPublic)
+      val publicMethods = allMethods.where(_.isPublic)
       allMethods.size should be > publicMethods.toList.size
     }
 
@@ -49,13 +49,13 @@ class StepsTest extends AnyWordSpec with Matchers {
         val method: Method        = cpg.method.head
         val results: List[Method] = cpg.method.id(method.id).toList
         results.size shouldBe 1
-        results.head.underlying.id
+        results.head.id
       }
 
       "providing multiple" in {
         // find two arbitrary methods so we can find it again in the next step
         val methods               = cpg.method.toList.take(2)
-        val results: List[Method] = cpg.method.id(methods.map(_.id): _*).toList
+        val results: List[Method] = cpg.method.id(methods.map(_.id)*).toList
 
         results.size shouldBe 2
         results.toSet shouldBe methods.toSet
@@ -120,12 +120,18 @@ class StepsTest extends AnyWordSpec with Matchers {
       val parsed = parse(json).children.head // exactly one result for the above query
       (parsed \ "_label") shouldBe JString("METHOD")
       (parsed \ "name") shouldBe JString("foo")
+
+      // id should be defined, but we don't care what number it is
+      (parsed \ "_id") shouldBe a[JInt]
     }
 
     "operating on NewNode" in {
       implicit val finder: NodeExtensionFinder = DefaultNodeExtensionFinder
-      val json                                 = cpg.method.name("foo").location.toJson
-      val parsed                               = parse(json).children.head // exactly one result for the above query
+      def location                             = cpg.method.name("foo").location
+
+      location.size shouldBe 1
+      val parsedChildren = parse(location.toJson).children
+      val parsed         = parsedChildren.head // exactly one result for the above query
       (parsed \ "symbol") shouldBe JString("foo")
       (parsed \ "className") shouldBe JString("AClass")
       (parsed \ "filename") shouldBe JString("N/A")
@@ -142,17 +148,17 @@ class StepsTest extends AnyWordSpec with Matchers {
 
     "use default `toString` if nothing else applies" in {
       case class Foo(i: Int)
-      val steps: Steps[Foo] = new Steps(Traversal.fromSingle(Foo(42)))
+      val steps: Steps[Foo] = new Steps(Iterator.single(Foo(42)))
       steps.p.head shouldBe "Foo(42)"
     }
 
     "render nodes as `(label,id): properties`" in {
-      def mainMethods: Traversal[Method] = cpg.method.name("woo")
+      def mainMethods: Iterator[Method] = cpg.method.name("woo")
 
       val nodeId  = mainMethods.head.id
       val printed = mainMethods.p.head
       printed.should(startWith(s"""(METHOD,$nodeId):"""))
-      printed.should(include("IS_EXTERNAL: false"))
+      printed.should(include("SIGNATURE: asignature"))
       printed.should(include("FULL_NAME: woo"))
     }
 
@@ -169,45 +175,57 @@ class StepsTest extends AnyWordSpec with Matchers {
         }
       }
 
-      import SomePackage._
+      import SomePackage.*
       def mainMethods: Steps[Method] = cpg.method.name("woo")
       mainMethods.p.head shouldBe "package defined pretty printer"
     }
   }
 
+  "should work on both Iterator (e.g. Traversal) and IterableOnce (e.g. Seq)" in {
+    val values  = Seq("a", "b")
+    val stream1 = values.iterator.s
+    val stream2 = values.s
+    // most importantly we want to verify that it compiles ^
+
+    stream1 shouldBe values
+    stream2 shouldBe values
+  }
+
   ".help step" should {
+    implicit val availableWidthProvider: AvailableWidthProvider = new ConstantWidth(120)
+
     "show domain overview" in {
-      val domainStartersHelp = Cpg.emptyCpg.help
+      val domainStartersHelp = Cpg.empty.help
       domainStartersHelp should include(".comment")
-      domainStartersHelp should include("All comments in source-based CPGs")
+      domainStartersHelp should include("A source code comment")
       domainStartersHelp should include(".arithmetic")
       domainStartersHelp should include("All arithmetic operations")
     }
 
     "provide node-specific overview" in {
-      val methodStepsHelp = Cpg.emptyCpg.method.help
-      methodStepsHelp should include("Available steps for Method")
+      val methodStepsHelp = Cpg.empty.method.help
+      methodStepsHelp should include("Available steps for `Method`")
       methodStepsHelp should include(".namespace")
       methodStepsHelp should include(".depth") // from AstNode
 
-      val methodStepsHelpVerbose = Cpg.emptyCpg.method.helpVerbose
-      methodStepsHelpVerbose should include("traversal name")
-      methodStepsHelpVerbose should include("io.shiftleft.semanticcpg.language.types.structure.Method")
+      val methodStepsHelpVerbose = Cpg.empty.method.helpVerbose
+      methodStepsHelpVerbose should include("implemented in")
+      methodStepsHelpVerbose should include("structure.MethodTraversal")
 
-      val assignmentStepsHelp = Cpg.emptyCpg.assignment.help
+      val assignmentStepsHelp = Cpg.empty.assignment.help
       assignmentStepsHelp should include("Left-hand sides of assignments") // from AssignmentTraversal
     }
 
     "provides generic help" when {
       "using verbose mode" when {
         "traversing nodes" in {
-          val methodTraversal = Traversal.empty[Method]
+          val methodTraversal = Iterator.empty[Method]
           methodTraversal.helpVerbose should include(".l")
           methodTraversal.helpVerbose should include(".label")
         }
 
         "traversing non-nodes" in {
-          val stringTraversal = Traversal.empty[String]
+          val stringTraversal = Iterator.empty[String]
           stringTraversal.helpVerbose should include(".l")
           stringTraversal.helpVerbose should not include ".label"
         }
@@ -295,15 +313,15 @@ class StepsTest extends AnyWordSpec with Matchers {
     methodRef.referencedMethod
     methodRef.headOption.map(_.referencedMethod)
 
-    def expression: Traversal[Expression] = cpg.identifier.name("anidentifier").cast[Expression]
+    def expression: Iterator[Expression] = cpg.identifier.name("anidentifier").cast[Expression]
     expression.expressionUp.isCall.size shouldBe 1
     expression.head.expressionUp.isCall.size shouldBe 1
 
-//    def cfg: Traversal[CfgNode] = cpg.method.name("add")
+//    def cfg: Iterator[CfgNode] = cpg.method.name("add")
 
-    def ast: Traversal[AstNode] = cpg.method.name("foo").cast[AstNode]
-    ast.astParent.property(Properties.NAME).head shouldBe "AClass"
-    ast.head.astParent.property(Properties.NAME) shouldBe "AClass"
+    def ast: Iterator[AstNode] = cpg.method.name("foo").cast[AstNode]
+    ast.astParent.property(Properties.Name).head shouldBe "AClass"
+    ast.head.astParent.property(Properties.Name) shouldBe "AClass"
 
     // methodForCallGraph
     method.call.size shouldBe 1
@@ -330,11 +348,49 @@ class StepsTest extends AnyWordSpec with Matchers {
     method.head.modifier.modifierType.toSetMutable shouldBe Set("modifiertype")
   }
 
-  "id starter step" in {
-    // only verifying what compiles and what doesn't...
-    // if it compiles, :shipit:
-    assertCompiles("cpg.id(1).out")
-    assertDoesNotCompile("cpg.id(1).outV") // `.outV` is only available on Traversal[Edge]
+  "property accessors" in {
+    val cpg = MockCpg().withCustom { (diffGraph, _) =>
+      diffGraph
+        .addNode(NewCall())
+        .addNode(
+          NewCall()
+            .typeFullName("aa")                       // Cardinality.One
+            .argumentName("bb")                       // Cardinality.ZeroOrOne
+            .dynamicTypeHintFullName(Seq("cc", "dd")) // Cardinality.List
+        )
+    }.cpg
+
+    val (Seq(emptyCall), Seq(callWithProperties)) = cpg.call.l.partition(_.argumentName.isEmpty)
+
+    // Cardinality.One
+    emptyCall.property(Properties.TypeFullName) shouldBe "<empty>"
+    emptyCall.propertyOption(Properties.TypeFullName) shouldBe Some("<empty>")
+    emptyCall.propertyOption(Properties.TypeFullName.name) shouldBe Some("<empty>")
+    // Cardinality.ZeroOrOne
+    emptyCall.property(Properties.ArgumentName) shouldBe None
+    emptyCall.propertyOption(Properties.ArgumentName) shouldBe None
+    emptyCall.propertyOption(Properties.ArgumentName.name) shouldBe None
+    // Cardinality.List
+    // these ones are rather a historic accident it'd be better and more consistent to return `None` here -
+    // we'll defer that change until after the flatgraph port though and just document it for now
+    emptyCall.property(Properties.DynamicTypeHintFullName) shouldBe Seq.empty
+    emptyCall.propertyOption(Properties.DynamicTypeHintFullName) shouldBe Some(Seq.empty)
+    emptyCall.propertyOption(Properties.DynamicTypeHintFullName.name) shouldBe Some(Seq.empty)
+
+    // Cardinality.One
+    callWithProperties.property(Properties.TypeFullName) shouldBe "aa"
+    callWithProperties.propertyOption(Properties.TypeFullName) shouldBe Some("aa")
+    callWithProperties.propertyOption(Properties.TypeFullName.name) shouldBe Some("aa")
+
+    // Cardinality.ZeroOrOne
+    callWithProperties.property(Properties.ArgumentName) shouldBe Some("bb")
+    callWithProperties.propertyOption(Properties.ArgumentName) shouldBe Some("bb")
+    callWithProperties.propertyOption(Properties.ArgumentName.name) shouldBe Some("bb")
+
+    // Cardinality.List
+    callWithProperties.property(Properties.DynamicTypeHintFullName) shouldBe Seq("cc", "dd")
+    callWithProperties.propertyOption(Properties.DynamicTypeHintFullName) shouldBe Some(Seq("cc", "dd"))
+    callWithProperties.propertyOption(Properties.DynamicTypeHintFullName.name) shouldBe Some(Seq("cc", "dd"))
   }
 
 }

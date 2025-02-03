@@ -1,8 +1,8 @@
 package io.joern.pysrc2cpg.cpg
 
+import io.joern.pysrc2cpg.testfixtures.Py2CpgTestContext
 import io.shiftleft.codepropertygraph.generated.DispatchTypes
-import io.joern.pysrc2cpg.Py2CpgTestContext
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,6 +42,25 @@ class FormatStringCpgTests extends AnyFreeSpec with Matchers {
       child1.code shouldBe "x"
       child1.argumentIndex shouldBe 1
     }
+  }
+
+  "test nested format string" in {
+    val cpg = Py2CpgTestContext.buildCpg("""
+        |f"{f'{a}'} "
+        |""".stripMargin)
+    val outerCall = cpg.call.methodFullName("<operator>.formatString").columnNumber(1).head
+    outerCall.code shouldBe """f"{f'{a}'} """"
+
+    val innerCall = cpg.call.methodFullName("<operator>.formatString").columnNumber(4).head
+    innerCall.code shouldBe """f'{a}'"""
+  }
+
+  "test format string with multiple replacement fields" in {
+    val cpg = Py2CpgTestContext.buildCpg("""
+                                           |f"{a} {b}"
+                                           |""".stripMargin)
+    val callNode = cpg.call.methodFullName("<operator>.formatString").head
+    callNode.code shouldBe """f"{a} {b}""""
   }
 
 }

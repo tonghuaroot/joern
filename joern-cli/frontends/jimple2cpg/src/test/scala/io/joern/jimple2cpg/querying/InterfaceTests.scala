@@ -1,8 +1,8 @@
 package io.joern.jimple2cpg.querying
 import io.joern.jimple2cpg.testfixtures.JimpleCode2CpgFixture
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 import java.io.File
 
@@ -36,6 +36,7 @@ class InterfaceTests extends JimpleCode2CpgFixture {
     x.fullName shouldBe "Foo.add:int(int,int)"
     x.isExternal shouldBe false
     x.order shouldBe 1
+    x.parameter.code.l shouldBe List("this", "int param1", "int param2")
   }
 
   "should contain the correct modifier(s)" in {

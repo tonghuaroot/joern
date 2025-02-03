@@ -1,12 +1,18 @@
 package io.joern.pysrc2cpg
 
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.passes.ConcurrentWriterCpgPass
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.passes.ForkJoinParallelCpgPass
 import io.joern.pysrc2cpg.Py2Cpg.InputProvider
 import io.joern.pythonparser.PyParser
+import io.joern.x2cpg.ValidationMode
 import org.slf4j.LoggerFactory
 
-class CodeToCpg(cpg: Cpg, inputProvider: Iterable[InputProvider]) extends ConcurrentWriterCpgPass[InputProvider](cpg) {
+class CodeToCpg(
+  cpg: Cpg,
+  inputProvider: Iterable[InputProvider],
+  schemaValidationMode: ValidationMode,
+  enableFileContent: Boolean
+) extends ForkJoinParallelCpgPass[InputProvider](cpg) {
   import CodeToCpg.logger
 
   override def generateParts(): Array[InputProvider] = inputProvider.toArray
@@ -18,13 +24,15 @@ class CodeToCpg(cpg: Cpg, inputProvider: Iterable[InputProvider]) extends Concur
       val lineBreakCorrectedCode = inputPair.content.replace("\r\n", "\n").replace("\r", "\n")
       val astRoot                = parser.parse(lineBreakCorrectedCode)
       val nodeToCode             = new NodeToCode(lineBreakCorrectedCode)
-      val astVisitor = new PythonAstVisitor(inputPair.absFileName, inputPair.relFileName, nodeToCode, PythonV2AndV3)
+      val astVisitor = new PythonAstVisitor(inputPair.relFileName, nodeToCode, PythonV2AndV3, enableFileContent)(
+        schemaValidationMode
+      )
       astVisitor.convert(astRoot)
 
-      diffGraph.absorb(astVisitor.getDiffGraph)
+      diffGraph.absorb(astVisitor.createAst())
     } catch {
       case exception: Throwable =>
-        logger.warn(s"Failed to convert file ${inputPair.absFileName}", exception)
+        logger.warn(s"Failed to convert file ${inputPair.relFileName}", exception)
         Iterator.empty
     }
   }

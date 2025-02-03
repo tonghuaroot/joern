@@ -1,7 +1,7 @@
 package io.joern.ghidra2cpg.querying.mips
 
 import io.joern.ghidra2cpg.fixtures.GhidraBinToCpgSuite
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class CallArgumentsTest extends GhidraBinToCpgSuite {
 
@@ -27,7 +27,8 @@ class CallArgumentsTest extends GhidraBinToCpgSuite {
       .name("memcpy")
       .argument
       .code
-      .l shouldBe List("auStack180", "param_1 + 0x5", "param_2 - 0x5")
+      .l shouldBe List("auStack_b4", "param_1 + 0x5", "param_2 - 0x5")
+
   }
   "The call to 'test' should have two arguments " in {
     cpg.call

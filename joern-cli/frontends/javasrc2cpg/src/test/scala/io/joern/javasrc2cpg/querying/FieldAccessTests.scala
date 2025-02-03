@@ -1,8 +1,8 @@
 package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, TypeRef}
+import io.shiftleft.semanticcpg.language.*
 
 class FieldAccessTests extends JavaSrcCode2CpgFixture {
 
@@ -45,7 +45,7 @@ class FieldAccessTests extends JavaSrcCode2CpgFixture {
 
   "should handle static member accesses" in {
     val List(access: Call)                                             = cpg.method(".*foo.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.name shouldBe "Foo"
     identifier.typeFullName shouldBe "Foo"
     fieldIdentifier.canonicalName shouldBe "MAX_VALUE"
@@ -53,7 +53,7 @@ class FieldAccessTests extends JavaSrcCode2CpgFixture {
 
   "should handle object field accesses on RHS of assignments" in {
     val List(access: Call)                                             = cpg.method(".*bar.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.name shouldBe "f"
     identifier.typeFullName shouldBe "Foo"
     fieldIdentifier.canonicalName shouldBe "value"
@@ -61,9 +61,49 @@ class FieldAccessTests extends JavaSrcCode2CpgFixture {
 
   "should handle object field accesses on LHS of assignments" in {
     val List(access: Call)                                             = cpg.method(".*baz.*").call(".*fieldAccess").l
-    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l
+    val List(identifier: Identifier, fieldIdentifier: FieldIdentifier) = access.argument.l: @unchecked
     identifier.name shouldBe "g"
     identifier.typeFullName shouldBe "Foo"
     fieldIdentifier.canonicalName shouldBe "value"
   }
+
+  "should link to the referencing static member" in {
+    val List(access: Call) = cpg.method(".*foo.*").call(".*fieldAccess").l
+    access.referencedMember.name.head shouldBe "MAX_VALUE"
+  }
+
+  "should link to the referencing dynamic member on the RHS of assignments" in {
+    val List(access: Call) = cpg.method(".*bar.*").call(".*fieldAccess").l
+    access.referencedMember.name.head shouldBe "value"
+  }
+
+  "should link to the referencing dynamic member on the LHS of assignments" in {
+    val List(access: Call) = cpg.method(".*baz.*").call(".*fieldAccess").l
+    access.referencedMember.name.head shouldBe "value"
+  }
+
+  "correctly handle access to statically imported field" in {
+    val cpg = code("""
+        |import static Bar.STATIC_INT;
+        |public class Foo {
+        |  public void foo() {
+        |    int x = STATIC_INT;
+        |  }
+        |}
+        |""".stripMargin)
+      .moreCode(
+        """
+          |public class Bar {
+          |  public static int STATIC_INT = 111;
+          |}
+          |""".stripMargin,
+        fileName = "Bar.java"
+      )
+
+    val List(assignment) = cpg.call.code("int x = STATIC_INT").l
+    val fieldAccess      = assignment.argument(2).asInstanceOf[Call]
+    val typeRef          = fieldAccess.argument(1).asInstanceOf[TypeRef]
+    typeRef.typeFullName shouldBe "Bar"
+  }
+
 }

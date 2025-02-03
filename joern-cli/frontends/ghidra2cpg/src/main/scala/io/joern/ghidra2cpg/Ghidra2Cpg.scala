@@ -3,6 +3,7 @@ package io.joern.ghidra2cpg
 import ghidra.GhidraJarApplicationLayout
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager
 import ghidra.app.util.importer.{AutoImporter, MessageLog}
+import ghidra.app.util.opinion.{Loaded, LoadResults}
 import ghidra.framework.model.{Project, ProjectLocator}
 import ghidra.framework.project.{DefaultProject, DefaultProjectManager}
 import ghidra.framework.protocol.ghidra.{GhidraURLConnection, Handler}
@@ -12,20 +13,20 @@ import ghidra.program.model.listing.Program
 import ghidra.program.util.{DefinedDataIterator, GhidraProgramUtilities}
 import ghidra.util.exception.InvalidInputException
 import ghidra.util.task.TaskMonitor
-import io.joern.ghidra2cpg.passes._
+import io.joern.ghidra2cpg.passes.*
 import io.joern.ghidra2cpg.passes.arm.ArmFunctionPass
 import io.joern.ghidra2cpg.passes.mips.{LoHiPass, MipsFunctionPass}
 import io.joern.ghidra2cpg.passes.x86.{ReturnEdgesPass, X86FunctionPass}
 import io.joern.ghidra2cpg.utils.Decompiler
 import io.joern.x2cpg.passes.frontend.{MetaDataPass, TypeNodePass}
 import io.joern.x2cpg.{X2Cpg, X2CpgFrontend}
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.Languages
 import utilities.util.FileUtilities
 
 import java.io.File
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 class Ghidra2Cpg extends X2CpgFrontend[Config] {
@@ -49,8 +50,18 @@ class Ghidra2Cpg extends X2CpgFrontend[Config] {
         try {
           val projectManager = new HeadlessGhidraProjectManager
           project = projectManager.createProject(locator, null, false)
-          program = AutoImporter.importByUsingBestGuess(inputFile, null, this, new MessageLog, TaskMonitor.DUMMY)
-          addProgramToCpg(program, inputFile.getCanonicalPath, cpg)
+          val programResults = AutoImporter.importByUsingBestGuess(
+            inputFile,
+            null,
+            tempWorkingDir.path.toAbsolutePath.toString,
+            this,
+            new MessageLog,
+            TaskMonitor.DUMMY
+          )
+          if (programResults != null && programResults.size() > 0) {
+            program = programResults.getPrimary().getDomainObject();
+            addProgramToCpg(program, inputFile.getCanonicalPath, cpg)
+          }
         } catch {
           case e: Exception =>
             e.printStackTrace()
@@ -86,7 +97,7 @@ class Ghidra2Cpg extends X2CpgFrontend[Config] {
       autoAnalysisManager.initializeOptions()
       autoAnalysisManager.reAnalyzeAll(null)
       autoAnalysisManager.startAnalysis(TaskMonitor.DUMMY)
-      GhidraProgramUtilities.setAnalyzedFlag(program, true)
+      GhidraProgramUtilities.markProgramAnalyzed(program)
       handleProgram(program, fileAbsolutePath, cpg)
     } catch {
       case e: Exception =>
@@ -116,7 +127,9 @@ class Ghidra2Cpg extends X2CpgFrontend[Config] {
       .toMap
 
     new MetaDataPass(cpg, Languages.GHIDRA, fileAbsolutePath).createAndApply()
-    new NamespacePass(cpg, flatProgramAPI.getProgramFile).createAndApply()
+    Option(flatProgramAPI.getProgramFile).foreach { programFile =>
+      new NamespacePass(cpg, programFile).createAndApply()
+    }
 
     program.getLanguage.getLanguageDescription.getProcessor.toString match {
       case "MIPS" =>
@@ -131,13 +144,10 @@ class Ghidra2Cpg extends X2CpgFrontend[Config] {
         new ReturnEdgesPass(cpg).createAndApply()
     }
 
-    new TypeNodePass(Types.types.toList, cpg).createAndApply()
+    TypeNodePass.withRegisteredTypes(Types.types.toList, cpg).createAndApply()
     new JumpPass(cpg).createAndApply()
     new LiteralPass(cpg, flatProgramAPI).createAndApply()
   }
-
-  private class HeadlessProjectConnection(projectManager: HeadlessGhidraProjectManager, connection: GhidraURLConnection)
-      extends DefaultProject(projectManager, connection) {}
 
   private class HeadlessGhidraProjectManager extends DefaultProjectManager {}
 }

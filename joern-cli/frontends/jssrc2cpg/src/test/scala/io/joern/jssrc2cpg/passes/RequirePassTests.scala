@@ -1,8 +1,10 @@
 package io.joern.jssrc2cpg.passes
 
+import io.joern.dataflowengineoss.language.*
 import io.joern.jssrc2cpg.testfixtures.DataFlowCodeToCpgSuite
-import io.shiftleft.semanticcpg.language._
-import io.joern.dataflowengineoss.language._
+import io.shiftleft.semanticcpg.language.*
+
+import java.io.File
 
 class RequirePassTests extends DataFlowCodeToCpgSuite {
 
@@ -28,9 +30,9 @@ class RequirePassTests extends DataFlowCodeToCpgSuite {
       "sampleone.js"
     )
 
-    cpg.call("externalfunc").methodFullName.l shouldBe List("sampleone.js::program:anonymous")
+    cpg.call("externalfunc").methodFullName.l shouldBe List("sampleone.js::program:<lambda>0")
     implicit val callResolver: NoResolve.type = NoResolve
-    cpg.call("externalfunc").callee.fullName.l shouldBe List("sampleone.js::program:anonymous")
+    cpg.call("externalfunc").callee.fullName.l shouldBe List("sampleone.js::program:<lambda>0")
 
     val sink   = cpg.call("log").argument(1)
     val source = cpg.literal.codeExact("\"foo\"")
@@ -68,6 +70,35 @@ class RequirePassTests extends DataFlowCodeToCpgSuite {
     val sink   = cpg.call("log").argument(1)
     val source = cpg.literal.codeExact("\"literal\"")
     sink.reachableByFlows(source).size shouldBe 2
+  }
+
+  "methods imported in TypeScript via relative importing" in {
+    lazy val cpg = code(
+      """
+        |export function foo() {}
+        |""".stripMargin,
+      "foo.ts"
+    ).moreCode(
+      """
+        |import { foo } from "../../foo.ts";
+        |
+        |foo();
+        |export function bar() {}
+        |""".stripMargin,
+      Seq("d1", "d2", "bar.ts").mkString(File.separator)
+    ).moreCode(
+      """
+        |import { bar } from "./d2/bar.ts";
+        |
+        |bar();
+        |""".stripMargin,
+      Seq("d1", "baz.ts").mkString(File.separator)
+    )
+
+    cpg.call("bar").methodFullName.headOption shouldBe Option(
+      Seq("d1", "d2", "bar.ts::program:bar").mkString(File.separator)
+    )
+    cpg.call("foo").methodFullName.headOption shouldBe Option("foo.ts::program:foo")
   }
 
 }

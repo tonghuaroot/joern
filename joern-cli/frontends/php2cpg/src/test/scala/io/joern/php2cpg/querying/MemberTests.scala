@@ -1,21 +1,24 @@
 package io.joern.php2cpg.querying
 
-import io.joern.php2cpg.parser.Domain.PhpOperators
+import io.joern.php2cpg.Config
+import io.joern.php2cpg.parser.Domain
 import io.joern.php2cpg.testfixtures.PhpCode2CpgFixture
 import io.joern.x2cpg.Defines
 import io.shiftleft.codepropertygraph.generated.{ModifierTypes, Operators}
-import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, Literal}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, Literal, Local}
+import io.shiftleft.semanticcpg.language.*
 
 class MemberTests extends PhpCode2CpgFixture {
 
   "class constants" should {
-    val cpg = code("""<?php
-                    |class Foo {
-                    |  const A = 'A', B = 'B';
-                    |  public const C = 'C';
-                    |}
-                    |""".stripMargin)
+    val source = """<?php
+      |class Foo {
+      |  const A = 'A', B = 'B';
+      |  public const C = 'C';
+      |}
+      |""".stripMargin
+
+    val cpg = code(source, "foo.php").withConfig(Config().withDisableFileContent(false))
 
     "have member nodes representing them" in {
       inside(cpg.typeDecl.name("Foo").member.sortBy(_.name).toList) { case List(aMember, bMember, cMember) =>
@@ -40,22 +43,31 @@ class MemberTests extends PhpCode2CpgFixture {
     "have a clinit method with the constant initializers" in {
 
       inside(cpg.method.nameExact(Defines.StaticInitMethodName).l) { case List(clinitMethod) =>
-        inside(clinitMethod.body.astChildren.l) { case List(aAssign: Call, bAssign: Call, cAssign: Call) =>
+        inside(clinitMethod.body.astChildren.l) { case List(self: Local, aAssign: Call, bAssign: Call, cAssign: Call) =>
+          self.name shouldBe "self"
           checkConstAssign(aAssign, "A")
           checkConstAssign(bAssign, "B")
           checkConstAssign(cAssign, "C")
         }
+        clinitMethod.isExternal shouldBe false
+        clinitMethod.offset shouldBe Some(0)
+        clinitMethod.offsetEnd shouldBe Some(source.length)
+        cpg.file
+          .name("foo.php")
+          .content
+          .map(_.substring(clinitMethod.offset.get, clinitMethod.offsetEnd.get))
+          .l shouldBe List(source)
       }
     }
   }
 
   "class properties (fields)" should {
     val cpg = code("""<?php
-                    |class Foo {
-                    |  public $a = 'a', $b = 'b';
-                    |  final protected $c = 'c';
-                    |}
-                    |""".stripMargin)
+      |class Foo {
+      |  public $a = 'a', $b = 'b';
+      |  final protected $c = 'c';
+      |}
+      |""".stripMargin)
 
     "have member nodes representing them" in {
       inside(cpg.typeDecl.name("Foo").member.sortBy(_.name).toList) { case List(aField, bField, cField) =>
@@ -77,7 +89,7 @@ class MemberTests extends PhpCode2CpgFixture {
     }
 
     "have assignments added to the default constructor" in {
-      inside(cpg.method.nameExact(Defines.ConstructorMethodName).l) { case List(initMethod) =>
+      inside(cpg.method.nameExact(Domain.ConstructorMethodName).l) { case List(initMethod) =>
         inside(initMethod.body.astChildren.l) { case List(aAssign: Call, bAssign: Call, cAssign: Call) =>
           checkFieldAssign(aAssign, "a")
           checkFieldAssign(bAssign, "b")
@@ -90,12 +102,12 @@ class MemberTests extends PhpCode2CpgFixture {
   "class properties (fields) for classes with a constructor" should {
 
     val cpg = code("""<?php
-                    |class Foo {
-                    |  public $a = 'a', $b = 'b';
-                    |  final protected $c = 'c';
-                    |  function __construct() { }
-                    |}
-                    |""".stripMargin)
+      |class Foo {
+      |  public $a = 'a', $b = 'b';
+      |  final protected $c = 'c';
+      |  function __construct() { }
+      |}
+      |""".stripMargin)
 
     "have member nodes representing them" in {
       inside(cpg.typeDecl.name("Foo").member.sortBy(_.name).toList) { case List(aField, bField, cField) =>
@@ -117,7 +129,7 @@ class MemberTests extends PhpCode2CpgFixture {
     }
 
     "have assignments added to the default constructor" in {
-      inside(cpg.method.nameExact(Defines.ConstructorMethodName).l) { case List(initMethod) =>
+      inside(cpg.method.nameExact(Domain.ConstructorMethodName).l) { case List(initMethod) =>
         inside(initMethod.body.astChildren.l) { case List(aAssign: Call, bAssign: Call, cAssign: Call) =>
           checkFieldAssign(aAssign, "a")
           checkFieldAssign(bAssign, "b")
@@ -128,7 +140,9 @@ class MemberTests extends PhpCode2CpgFixture {
   }
 
   "class const accesses should be created with the correct field access" in {
-    val cpg = code("<?php\nFoo::X;")
+    val cpg = code("""<?php
+      |Foo::X;
+      |""".stripMargin)
 
     inside(cpg.call.nameExact(Operators.fieldAccess).l) { case List(fieldAccess) =>
       fieldAccess.code shouldBe "Foo::X"
@@ -150,9 +164,9 @@ class MemberTests extends PhpCode2CpgFixture {
 
   "non-class consts" should {
     val cpg = code("""<?php
-        |const X = 'X';
-        |echo X;
-        |""".stripMargin)
+      |const X = 'X';
+      |echo X;
+      |""".stripMargin)
 
     "be treated as members of global typeDecl" in {
       inside(cpg.member.l) { case List(xMember) =>
@@ -211,9 +225,14 @@ class MemberTests extends PhpCode2CpgFixture {
     assign.name shouldBe Operators.assignment
     assign.methodFullName shouldBe Operators.assignment
 
-    inside(assign.argument.l) { case List(target: Identifier, source: Literal) =>
-      target.name shouldBe expectedValue
-      target.code shouldBe expectedValue
+    inside(assign.argument.l) { case List(target: Call, source: Literal) =>
+      inside(target.argument.l) { case List(base: Identifier, field: FieldIdentifier) =>
+        base.name shouldBe "self"
+        field.code shouldBe expectedValue
+      }
+
+      target.name shouldBe Operators.fieldAccess
+      target.code shouldBe s"self::$expectedValue"
       target.argumentIndex shouldBe 1
 
       source.code shouldBe s"\"$expectedValue\""

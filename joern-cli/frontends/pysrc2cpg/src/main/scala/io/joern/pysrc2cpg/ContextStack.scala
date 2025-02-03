@@ -1,14 +1,26 @@
 package io.joern.pysrc2cpg
 
+import io.joern.pysrc2cpg.ContextStack.transferLineColInfo
+import io.joern.pysrc2cpg.memop.*
+import io.joern.x2cpg.frontendspecific.pysrc2cpg.Constants
 import io.shiftleft.codepropertygraph.generated.nodes
-import io.shiftleft.codepropertygraph.generated.nodes.{NewClosureBinding, NewIdentifier, NewLocal, NewMethod, NewNode}
-import io.joern.pysrc2cpg.memop._
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import org.slf4j.LoggerFactory
 
 import scala.collection.mutable
 
 object ContextStack {
   private val logger = LoggerFactory.getLogger(getClass)
+
+  def transferLineColInfo(src: NewIdentifier, tgt: NewLocal): Unit = {
+    src.lineNumber match {
+      // If there are multiple occurrences and the local is already set, ignore later updates
+      case Some(srcLineNo) if tgt.lineNumber.isEmpty || !tgt.lineNumber.exists(_ < srcLineNo) =>
+        tgt.lineNumber(src.lineNumber)
+        tgt.columnNumber(src.columnNumber)
+      case _ =>
+    }
+  }
 }
 
 class ContextStack {
@@ -19,10 +31,11 @@ class ContextStack {
     val order: AutoIncIndex
     val variables: mutable.Map[String, nodes.NewNode]
     var lambdaCounter: Int
+    val methodCounter: mutable.Map[String, Int]
   }
 
   private class MethodContext(
-    val name: String,
+    val scopeName: Option[String],
     val astParent: nodes.NewNode,
     val order: AutoIncIndex,
     val isClassBodyMethod: Boolean = false,
@@ -31,15 +44,17 @@ class ContextStack {
     val variables: mutable.Map[String, nodes.NewNode] = mutable.Map.empty,
     val globalVariables: mutable.Set[String] = mutable.Set.empty,
     val nonLocalVariables: mutable.Set[String] = mutable.Set.empty,
-    var lambdaCounter: Int = 0
+    var lambdaCounter: Int = 0,
+    val methodCounter: mutable.Map[String, Int] = mutable.Map.empty
   ) extends Context {}
 
   private class ClassContext(
-    val name: String,
+    val scopeName: Option[String],
     val astParent: nodes.NewNode,
     val order: AutoIncIndex,
     val variables: mutable.Map[String, nodes.NewNode] = mutable.Map.empty,
-    var lambdaCounter: Int = 0
+    var lambdaCounter: Int = 0,
+    val methodCounter: mutable.Map[String, Int] = mutable.Map.empty
   ) extends Context {}
 
   // Used to represent comprehension variable and exception
@@ -56,7 +71,8 @@ class ContextStack {
     val astParent: nodes.NewNode,
     val order: AutoIncIndex,
     val variables: mutable.Map[String, nodes.NewNode] = mutable.Map.empty,
-    var lambdaCounter: Int = 0
+    var lambdaCounter: Int = 0,
+    val methodCounter: mutable.Map[String, Int] = mutable.Map.empty
   ) extends Context {}
 
   private case class VariableReference(
@@ -81,7 +97,7 @@ class ContextStack {
   }
 
   def pushMethod(
-    name: String,
+    scopeName: Option[String],
     methodNode: nodes.NewMethod,
     methodBlockNode: nodes.NewBlock,
     methodRefNode: Option[nodes.NewMethodRef]
@@ -89,15 +105,22 @@ class ContextStack {
     val isClassBodyMethod = stack.headOption.exists(_.isInstanceOf[ClassContext])
 
     val methodContext =
-      new MethodContext(name, methodNode, new AutoIncIndex(1), isClassBodyMethod, Some(methodBlockNode), methodRefNode)
+      new MethodContext(
+        scopeName,
+        methodNode,
+        new AutoIncIndex(1),
+        isClassBodyMethod,
+        Some(methodBlockNode),
+        methodRefNode
+      )
     if (moduleMethodContext.isEmpty) {
       moduleMethodContext = Some(methodContext)
     }
     push(methodContext)
   }
 
-  def pushClass(name: String, classNode: nodes.NewTypeDecl): Unit = {
-    push(new ClassContext(name, classNode, new AutoIncIndex(1)))
+  def pushClass(scopeName: Option[String], classNode: nodes.NewTypeDecl): Unit = {
+    push(new ClassContext(scopeName, classNode, new AutoIncIndex(1)))
   }
 
   def pushSpecialContext(): Unit = {
@@ -137,7 +160,7 @@ class ContextStack {
 
   def createIdentifierLinks(
     createLocal: (String, Option[String]) => nodes.NewLocal,
-    createClosureBinding: (String, String) => nodes.NewClosureBinding,
+    createClosureBinding: (String) => nodes.NewClosureBinding,
     createAstEdge: (nodes.NewNode, nodes.NewNode, Int) => Unit,
     createRefEdge: (nodes.NewNode, nodes.NewNode) => Unit,
     createCaptureEdge: (nodes.NewNode, nodes.NewNode) => Unit
@@ -156,6 +179,7 @@ class ContextStack {
         !moduleMethodContext.get.variables.contains(name)
       ) {
         val localNode = createLocal(name, None)
+        transferLineColInfo(identifier, localNode)
         createAstEdge(localNode, moduleMethodContext.get.methodBlockNode.get, moduleMethodContext.get.order.getAndInc)
         moduleMethodContext.get.variables.put(name, localNode)
       }
@@ -202,7 +226,8 @@ class ContextStack {
         } else if (memOp == Store) {
           var variableNode = lookupVariableInMethod(name, contextStack)
           if (variableNode.isEmpty) {
-            val localNode              = createLocal(name, None)
+            val localNode = createLocal(name, None)
+            transferLineColInfo(identifier, localNode)
             val enclosingMethodContext = findEnclosingMethodContext(contextStack)
             createAstEdge(localNode, enclosingMethodContext.methodBlockNode.get, enclosingMethodContext.order.getAndInc)
             enclosingMethodContext.variables.put(name, localNode)
@@ -215,17 +240,62 @@ class ContextStack {
             case Some(variableNode) =>
               createRefEdge(variableNode, identifier)
             case None =>
-              logger.warn("Unable to link identifier. Resulting CPG will have invalid format.")
+              // When we could not find a matching variable we get here and create a local in
+              // the method context so that we can link something and fullfil the CPG
+              // format requirements.
+              // For example this happens when there are wildcard imports directly into the
+              // modules namespace.
+              val localNode = createLocal(name, None)
+              transferLineColInfo(identifier, localNode)
+              val methodContext = findEnclosingMethodContext(contextStack)
+              createAstEdge(localNode, methodContext.methodBlockNode.get, methodContext.order.getAndInc)
+              methodContext.variables.put(name, localNode)
+              createRefEdge(localNode, identifier)
           }
-
         }
       }
     }
   }
 
+  /** Assignments to variables on the module-level may be exported to other modules and behave as inter-procedurally
+    * global variables.
+    * @param lhs
+    *   the LHS node of an assignment
+    */
+  def considerAsGlobalVariable(lhs: NewNode): Unit = {
+    lhs match {
+      case n: NewIdentifier if findEnclosingMethodContext(stack).scopeName.contains(Constants.moduleName) =>
+        addGlobalVariable(n.name)
+      case _ =>
+    }
+  }
+
+  /** For module-methods, the variables of this method can be imported into other modules which resembles behaviour much
+    * like fields/members. This inter-procedural accessibility should be marked via the module's type decl node.
+    */
+  def createMemberLinks(moduleTypeDecl: NewTypeDecl, astEdgeLinker: (NewNode, NewNode, Int) => Unit): Unit = {
+    val globalVarsForEnclMethod = findEnclosingMethodContext(stack).globalVariables
+    variableReferences
+      .map(_.identifier)
+      .filter(i => globalVarsForEnclMethod.contains(i.name))
+      .sortBy(i => (i.lineNumber, i.columnNumber))
+      .distinctBy(_.name)
+      .map(i =>
+        NewMember()
+          .name(i.name)
+          .typeFullName(Constants.ANY)
+          .dynamicTypeHintFullName(i.dynamicTypeHintFullName)
+          .lineNumber(i.lineNumber)
+          .columnNumber(i.columnNumber)
+          .code(i.name)
+      )
+      .zipWithIndex
+      .foreach { case (m, idx) => astEdgeLinker(m, moduleTypeDecl, idx + 1) }
+  }
+
   private def linkLocalOrCapturing(
     createLocal: (String, Option[String]) => NewLocal,
-    createClosureBinding: (String, String) => NewClosureBinding,
+    createClosureBinding: (String) => NewClosureBinding,
     createAstEdge: (NewNode, NewNode, Int) => Unit,
     createRefEdge: (NewNode, NewNode) => Unit,
     createCaptureEdge: (NewNode, NewNode) => Unit,
@@ -244,36 +314,42 @@ class ContextStack {
         case methodContext: MethodContext =>
           // Context is only relevant for linking if it is not a class body methods context
           // or the identifier/reference itself is from the class body method context.
-          if (!methodContext.isClassBodyMethod || methodContext == startContext) {
-            contextHasVariable = context.variables.contains(name)
-
-            val closureBindingId =
-              methodContext.astParent.asInstanceOf[NewMethod].fullName + ":" + name
-
-            if (!contextHasVariable) {
-              if (context != moduleMethodContext.get) {
-                val localNode = createLocal(name, Some(closureBindingId))
-                createAstEdge(localNode, methodContext.methodBlockNode.get, methodContext.order.getAndInc)
-                methodContext.variables.put(name, localNode)
-              } else {
-                // When we could not even find a matching variable in the module context we get
-                // here and create a local so that we can link something and fullfil the CPG
-                // format requirements.
-                // For example this happens when there are wildcard imports directly into the
-                // modules namespace.
-                val localNode = createLocal(name, None)
-                createAstEdge(localNode, methodContext.methodBlockNode.get, methodContext.order.getAndInc)
-                methodContext.variables.put(name, localNode)
-              }
+          val mangledName =
+            if (!methodContext.isClassBodyMethod || methodContext == startContext) {
+              name
+            } else {
+              s"<captured>$name"
             }
-            val localNodeInContext = methodContext.variables(name)
+          contextHasVariable = context.variables.contains(mangledName)
 
-            createRefEdge(localNodeInContext, identifierOrClosureBindingToLink)
+          val closureBindingId =
+            methodContext.astParent.asInstanceOf[NewMethod].fullName + ":" + name
 
-            if (!contextHasVariable && context != moduleMethodContext.get) {
-              identifierOrClosureBindingToLink = createClosureBinding(closureBindingId, name)
-              createCaptureEdge(identifierOrClosureBindingToLink, methodContext.methodRefNode.get)
+          if (!contextHasVariable) {
+            if (context != moduleMethodContext.get) {
+              val localNode = createLocal(mangledName, Some(closureBindingId))
+              transferLineColInfo(identifier, localNode)
+              createAstEdge(localNode, methodContext.methodBlockNode.get, methodContext.order.getAndInc)
+              methodContext.variables.put(mangledName, localNode)
+            } else {
+              // When we could not even find a matching variable in the module context we get
+              // here and create a local so that we can link something and fullfil the CPG
+              // format requirements.
+              // For example this happens when there are wildcard imports directly into the
+              // modules namespace.
+              val localNode = createLocal(mangledName, None)
+              transferLineColInfo(identifier, localNode)
+              createAstEdge(localNode, methodContext.methodBlockNode.get, methodContext.order.getAndInc)
+              methodContext.variables.put(mangledName, localNode)
             }
+          }
+          val localNodeInContext = methodContext.variables(mangledName)
+
+          createRefEdge(localNodeInContext, identifierOrClosureBindingToLink)
+
+          if (!contextHasVariable && context != moduleMethodContext.get) {
+            identifierOrClosureBindingToLink = createClosureBinding(closureBindingId)
+            createCaptureEdge(identifierOrClosureBindingToLink, methodContext.methodRefNode.get)
           }
         case specialBlockContext: SpecialBlockContext =>
           contextHasVariable = context.variables.contains(name)
@@ -326,11 +402,11 @@ class ContextStack {
     stack
       .flatMap {
         case methodContext: MethodContext =>
-          Some(methodContext.name)
+          methodContext.scopeName
         case specialBlockContext: SpecialBlockContext =>
           None
         case classContext: ClassContext =>
-          Some(classContext.name)
+          classContext.scopeName
       }
       .reverse
       .mkString(".")
@@ -355,12 +431,14 @@ class ContextStack {
   }
 
   def isClassContext: Boolean = {
-    val stackTail = stack.tail
-    stackTail.nonEmpty && (stackTail.headOption match {
-      case Some(_: ClassContext)  => true
-      case Some(x: MethodContext) => x.name.endsWith("<body>")
-      case _                      => false
+    stack.nonEmpty && (stack.head match {
+      case methodContext: MethodContext if methodContext.isClassBodyMethod => true
+      case _                                                               => false
     })
+  }
+
+  def methodCounter: mutable.Map[String, Int] = {
+    stack.head.methodCounter
   }
 
 }

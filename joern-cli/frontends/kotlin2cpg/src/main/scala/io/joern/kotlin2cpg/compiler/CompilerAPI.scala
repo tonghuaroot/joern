@@ -7,25 +7,15 @@ import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys
 import org.jetbrains.kotlin.cli.common.config.KotlinSourceRoot
 import org.jetbrains.kotlin.cli.jvm.compiler.{EnvironmentConfigFiles, KotlinCoreEnvironment}
 import org.jetbrains.kotlin.cli.jvm.config.{JavaSourceRoot, JvmClasspathRoot}
-import org.jetbrains.kotlin.config.{CommonConfigurationKeys, CompilerConfiguration, CompilerConfigurationKey}
+import org.jetbrains.kotlin.config.{CommonConfigurationKeys, CompilerConfiguration, JVMConfigurationKeys}
 import org.jetbrains.kotlin.metadata.jvm.deserialization.JvmProtoBufUtil
-import org.jetbrains.kotlin.com.intellij.mock.MockProject
 import org.jetbrains.kotlin.com.intellij.openapi.util.Disposer
-import org.jetbrains.kotlin.compiler.plugin.ComponentRegistrar
 import org.jetbrains.kotlin.cli.common.messages.{
   CompilerMessageSeverity,
   CompilerMessageSourceLocation,
   MessageCollector
 }
 import org.slf4j.LoggerFactory
-
-import scala.jdk.CollectionConverters.CollectionHasAsScala
-
-case class CompilerPluginInfo(
-  registrarName: String,
-  registrar: ComponentRegistrar,
-  configOptions: Map[CompilerConfigurationKey[java.util.List[String]], String]
-) {}
 
 object CompilerAPI {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -34,14 +24,16 @@ object CompilerAPI {
     forDirectories: Seq[String],
     javaSourceRoots: Seq[String],
     defaultContentRootJarPaths: Seq[DefaultContentRootJarPath] = List(),
-    compilerPlugins: Seq[CompilerPluginInfo] = Seq(),
     messageCollector: MessageCollector
   ): KotlinCoreEnvironment = {
     val config = new CompilerConfiguration()
     config.put(CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY, messageCollector)
     forDirectories.foreach { p =>
-      config.add(CLIConfigurationKeys.CONTENT_ROOTS, new KotlinSourceRoot(p, true))
+      config.add(CLIConfigurationKeys.CONTENT_ROOTS, new KotlinSourceRoot(p, true, null))
     }
+
+    val javaHome = File(System.getProperty("java.home"))
+    config.put(JVMConfigurationKeys.JDK_HOME, javaHome)
 
     defaultContentRootJarPaths.foreach { path =>
       if (!path.isResource) {
@@ -53,6 +45,9 @@ object CompilerAPI {
           logger.warn(s"Path to dependency does not point to existing file `${path.path}`.")
         }
       } else {
+        // We have to copy the resource file to a proper file in the file system in order
+        // to satisfy the requirements of `JvmClassPathRoot` which expects a proper `java.io.File`
+        // which in turn cannot represent files in resources.
         val resourceStream = getClass.getClassLoader.getResourceAsStream(path.path)
         if (resourceStream != null) {
           val tempFile = File.createTempFile("kotlin2cpgDependencies", "")
@@ -85,30 +80,10 @@ object CompilerAPI {
     val configFiles = EnvironmentConfigFiles.JVM_CONFIG_FILES
     val disposable  = Disposer.newDisposable()
 
-    val registrarKeys =
-      compilerPlugins.map { plugin =>
-        plugin.registrarName -> CompilerConfigurationKey.create[java.util.List[ComponentRegistrar]](
-          plugin.registrarName
-        )
-      }.toMap
-    compilerPlugins.foreach { plugin =>
-      plugin.configOptions.foreach { case (k, v) =>
-        config.add(k, v)
-      }
-      config.add(registrarKeys(plugin.registrarName), plugin.registrar)
-    }
     val environment = KotlinCoreEnvironment.createForProduction(disposable, config, configFiles)
-    compilerPlugins.foreach { plugin =>
-      config.getList(registrarKeys(plugin.registrarName)).asScala.foreach { r =>
-        r.registerProjectComponents(environment.getProject.asInstanceOf[MockProject], config)
-      }
-    }
-
     environment
   }
 }
-
-class CompilerAPI {}
 
 class ErrorLoggingMessageCollector extends MessageCollector {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -124,4 +99,5 @@ class ErrorLoggingMessageCollector extends MessageCollector {
   }
   override def hasErrors: Boolean = false
   override def clear(): Unit      = {}
+
 }

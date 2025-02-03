@@ -1,21 +1,25 @@
 package io.joern.console
 
-import org.apache.commons.lang.WordUtils
-import overflowdb.traversal.help.DocFinder._
-import overflowdb.traversal.help.{Table, DocFinder}
+import flatgraph.help.DocFinder.*
+import flatgraph.help.Table.{AvailableWidthProvider, Row}
+import flatgraph.help.{DocFinder, Table}
 
 object Help {
 
-  private val width = 80
+  /** allows users to extend the help table with additional entries */
+  val additionalHelpEntries = Seq.newBuilder[Tuple3[String, String, String]]
 
-  def overview(clazz: Class[_]): String = {
+  def overview(clazz: Class[?])(using AvailableWidthProvider): String = {
     val columnNames = List("command", "description", "example")
-    val rows = DocFinder
-      .findDocumentedMethodsOf(clazz)
-      .map { case StepDoc(_, funcName, doc) =>
-        List(funcName, doc.info, doc.example)
-      }
-      .toList ++ List(runRow)
+
+    val rows = Seq.newBuilder[Row]
+    rows += runRow
+    DocFinder.findDocumentedMethodsOf(clazz).foreach { case StepDoc(_, funcName, doc) =>
+      rows += List(funcName, doc.info, doc.example)
+    }
+    additionalHelpEntries.result().foreach { case (a, b, c) =>
+      rows += List(a, b, c)
+    }
 
     val header = formatNoQuotes("""
       |
@@ -29,7 +33,7 @@ object Help {
       |
       |
       |""".stripMargin)
-    header + "\n" + Table(columnNames, rows.sortBy(_.head)).render
+    header + "\n" + Table(columnNames, rows.result().sortBy(_.head)).render
   }
 
   def format(text: String): String = {
@@ -39,7 +43,6 @@ object Help {
   def formatNoQuotes(text: String): String = {
     text.stripMargin
       .split("\n\n")
-      .map(x => WordUtils.wrap(x.replace("\n", " "), width))
       .mkString("\n\n")
       .trim
   }
@@ -48,30 +51,26 @@ object Help {
     List("run", "Run analyzer on active CPG", "run.securityprofile")
 
   // Since `run` is generated dynamically, it's not picked up when looking
-  // through methods via reflection, and therefore, we are adding
-  // it manually.
+  // through methods via reflection, and therefore, we are adding it manually.
   def runLongHelp: String =
     Help.format("""
         |
         |""".stripMargin)
 
-  def codeForHelpCommand(clazz: Class[_]): String = {
+  def codeForHelpCommand(clazz: Class[?]): String = {
     val membersCode = DocFinder
       .findDocumentedMethodsOf(clazz)
       .map { case StepDoc(_, funcName, doc) =>
-        s"val $funcName : String = ${Help.format(doc.longInfo)}"
+        s"    val $funcName: String = ${Help.format(doc.longInfo)}"
       }
       .mkString("\n")
 
-    val overview = Help.overview(clazz)
     s"""
        | class Helper() {
+       |   def run: String = Help.runLongHelp
+       |   override def toString: String = Help.overview(classOf[${clazz.getName}])
        |
-       | $membersCode
-       |
-       | def run : String = Help.runLongHelp
-       |
-       |  override def toString : String = \"\"\"$overview\"\"\"
+       |  $membersCode
        | }
        |
        | val help = new Helper

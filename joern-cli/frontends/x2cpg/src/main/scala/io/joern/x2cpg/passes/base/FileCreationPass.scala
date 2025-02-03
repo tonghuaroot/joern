@@ -1,19 +1,20 @@
 package io.joern.x2cpg.passes.base
 
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes.{NewFile, StoredNode}
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes, PropertyNames}
+import io.joern.x2cpg.utils.LinkingUtil
+import io.shiftleft.codepropertygraph.generated.nodes.{File, NewFile, StoredNode}
+import io.shiftleft.codepropertygraph.generated.{Cpg, EdgeTypes, NodeTypes, PropertyNames}
 import io.shiftleft.passes.CpgPass
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.FileTraversal
-import io.joern.x2cpg.passes.callgraph.MethodRefLinker
 
 import scala.collection.mutable
 
 /** For all nodes with FILENAME fields, create corresponding FILE nodes and connect node with FILE node via outgoing
   * SOURCE_FILE edges.
   */
-class FileCreationPass(cpg: Cpg) extends CpgPass(cpg) {
+class FileCreationPass(cpg: Cpg) extends CpgPass(cpg) with LinkingUtil {
+  private val srcLabels = List(NodeTypes.NAMESPACE_BLOCK, NodeTypes.TYPE_DECL, NodeTypes.METHOD, NodeTypes.COMMENT)
+
   override def run(dstGraph: DiffGraphBuilder): Unit = {
     val originalFileNameToNode = mutable.Map.empty[String, StoredNode]
     val newFileNameToNode      = mutable.Map.empty[String, NewFile]
@@ -23,7 +24,7 @@ class FileCreationPass(cpg: Cpg) extends CpgPass(cpg) {
     }
 
     def createFileIfDoesNotExist(srcNode: StoredNode, destFullName: String): Unit = {
-      if (destFullName != srcNode.propertyDefaultValue(PropertyNames.FILENAME)) {
+      if (destFullName != File.PropertyDefaults.Name) {
         val dstFullName = if (destFullName == "") { FileTraversal.UNKNOWN }
         else { destFullName }
         val newFile = newFileNameToNode.getOrElseUpdate(
@@ -37,20 +38,21 @@ class FileCreationPass(cpg: Cpg) extends CpgPass(cpg) {
       }
     }
 
-    // Create SOURCE_FILE edges from nodes of various types
-    // to FILE
-
-    MethodRefLinker.linkToSingle(
+    // Create SOURCE_FILE edges from nodes of various types to FILE
+    linkToSingle(
       cpg,
-      srcLabels = List(NodeTypes.NAMESPACE_BLOCK, NodeTypes.TYPE_DECL, NodeTypes.METHOD, NodeTypes.COMMENT),
+      srcNodes = cpg.graph.nodes(srcLabels*).cast[StoredNode].toList,
+      srcLabels = srcLabels,
       dstNodeLabel = NodeTypes.FILE,
       edgeType = EdgeTypes.SOURCE_FILE,
       dstNodeMap = { x =>
         originalFileNameToNode.get(x)
       },
       dstFullNameKey = PropertyNames.FILENAME,
+      dstDefaultPropertyValue = File.PropertyDefaults.Name,
       dstGraph,
       Some(createFileIfDoesNotExist)
     )
   }
+
 }

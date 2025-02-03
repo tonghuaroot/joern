@@ -1,12 +1,11 @@
 package io.shiftleft.semanticcpg.language.nodemethods
 
-import io.shiftleft.Implicits.JavaIteratorDeco
-import io.shiftleft.codepropertygraph.generated.nodes._
+import io.shiftleft.Implicits.IterableOnceDeco
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.NodeExtension
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.nodemethods.AstNodeMethods.lastExpressionInBlock
 import io.shiftleft.semanticcpg.utils.MemberAccess
-import overflowdb.traversal.Traversal
 
 class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
 
@@ -57,7 +56,7 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
     val additionalDepth = if (p(node)) { 1 }
     else { 0 }
 
-    val childDepths = node.astChildren.map(_.depth(p)).l
+    val childDepths = astChildren.map(_.depth(p)).l
     additionalDepth + (if (childDepths.isEmpty) {
                          0
                        } else {
@@ -70,18 +69,18 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
 
   /** Direct children of node in the AST. Siblings are ordered by their `order` fields
     */
-  def astChildren: Traversal[AstNode] =
-    node._astOut.cast[AstNode].sortBy(_.order)
+  def astChildren: Iterator[AstNode] =
+    node._astOut.cast[AstNode].toSeq.sortBy(_.order).iterator
 
   /** Siblings of this node in the AST, ordered by their `order` fields
     */
-  def astSiblings: Traversal[AstNode] =
+  def astSiblings: Iterator[AstNode] =
     astParent.astChildren.filter(_ != node)
 
   /** Nodes of the AST rooted in this node, including the node itself.
     */
-  def ast: Traversal[AstNode] =
-    Traversal.fromSingle(node).ast
+  def ast: Iterator[AstNode] =
+    Iterator.single(node).ast
 
   /** Textual representation of AST node
     */
@@ -109,8 +108,7 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
       case member: Member          => member
       case node: MethodParameterIn => node.method
 
-      case node: MethodParameterOut =>
-        node.method.methodReturn
+      case node: MethodParameterOut => node.method.methodReturn
 
       case node: Call if MemberAccess.isGenericMemberAccessName(node.name) =>
         parentExpansion(node)
@@ -131,9 +129,8 @@ class AstNodeMethods(val node: AstNode) extends AnyVal with NodeExtension {
 
 object AstNodeMethods {
 
-  import scala.jdk.CollectionConverters._
   private def lastExpressionInBlock(block: Block): Option[Expression] =
-    block._astOut.asScala
+    block._astOut
       .collect {
         case node: Expression if !node.isInstanceOf[Local] && !node.isInstanceOf[Method] => node
       }

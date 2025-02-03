@@ -1,6 +1,11 @@
 package io.joern.x2cpg
 
 object Defines {
+
+  // Represents an unresolved type, or indicates that one cannot guarantee a single type
+  // for the given node.
+  val Any = "ANY"
+
   // The following two defines should be used for type and method full names to
   // indicate unresolved static type information. Using them enables
   // the closed source backend to apply policies in a less strict fashion.
@@ -24,5 +29,16 @@ object Defines {
 
   // In some languages like Javascript dynamic calls do not provide any statically known
   // method/function interface information. In those cases please use this value.
-  val DynamicCallUnknownFallName = "<unknownFullName>"
+  val DynamicCallUnknownFullName = "<unknownFullName>"
+
+  // Anonymous functions, lambdas, and closures, follow the naming scheme of $LambdaPrefix$int
+  val ClosurePrefix = "<lambda>"
+
+  val LeftAngularBracket = "<"
+  val Unknown            = "<unknown>"
+
+  // Used for field access calls in the lowering of pattern extractors where the field name
+  // may not be known. As an example in javasrc2cpg, the assignment for `o instanceof Foo(Bar b))` could
+  // be lowered to `Bar b = (Bar) (((Foo) o).<unknownField>)`
+  val UnknownField = "<unknownField>"
 }

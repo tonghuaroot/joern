@@ -1,6 +1,6 @@
 package io.joern.pythonparser
 
-import io.joern.pythonparser.ast._
+import io.joern.pythonparser.ast.*
 
 trait AstVisitor[T] {
   def visit(ast: iast): T
@@ -15,6 +15,7 @@ trait AstVisitor[T] {
   def visit(ret: Return): T
   def visit(delete: Delete): T
   def visit(assign: Assign): T
+  def visit(typeAlias: TypeAlias): T
   def visit(annAssign: AnnAssign): T
   def visit(augAssign: AugAssign): T
   def visit(forStmt: For): T
@@ -23,6 +24,7 @@ trait AstVisitor[T] {
   def visit(ifStmt: If): T
   def visit(withStmt: With): T
   def visit(withStmt: AsyncWith): T
+  def visit(matchStmt: Match): T
   def visit(raise: Raise): T
   def visit(tryStmt: Try): T
   def visit(assert: Assert): T
@@ -128,5 +130,29 @@ trait AstVisitor[T] {
 
   def visit(withItem: Withitem): T
 
+  def visit(matchCase: MatchCase): T
+
+  def visit(matchValue: MatchValue): T
+
+  def visit(matchSingleton: MatchSingleton): T
+
+  def visit(matchSequence: MatchSequence): T
+
+  def visit(matchMapping: MatchMapping): T
+
+  def visit(matchClass: MatchClass): T
+
+  def visit(matchStar: MatchStar): T
+
+  def visit(matchAs: MatchAs): T
+
+  def visit(matchOr: MatchOr): T
+
   def visit(typeIgnore: TypeIgnore): T
+
+  def visit(typeVar: TypeVar): T
+
+  def visit(paramSpec: ParamSpec): T
+
+  def visit(typeVarTyple: TypeVarTuple): T
 }

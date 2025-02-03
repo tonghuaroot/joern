@@ -1,12 +1,13 @@
 package io.joern.dataflowengineoss.language
 
 import io.shiftleft.codepropertygraph.generated.nodes.{AstNode, CfgNode, Member, MethodParameterIn}
-import io.shiftleft.semanticcpg.language._
-import org.apache.commons.lang.StringUtils
-import overflowdb.traversal.help.Table
+import io.shiftleft.semanticcpg
+import io.shiftleft.semanticcpg.language.*
+import flatgraph.help.Table
+import flatgraph.help.Table.AvailableWidthProvider
 
 case class Path(elements: List[AstNode]) {
-  def resultPairs(): List[(String, Option[Integer])] = {
+  def resultPairs(): List[(String, Option[Int])] = {
     val pairs = elements.map {
       case point: MethodParameterIn =>
         val method      = point.method
@@ -21,9 +22,11 @@ case class Path(elements: List[AstNode]) {
 
 object Path {
 
-  implicit val show: Show[Path] = { path =>
-    Table(
-      columnNames = Array("nodeType", "tracked", "lineNumber", "method", "file"),
+  implicit def show(implicit
+    availableWidthProvider: AvailableWidthProvider = semanticcpg.defaultAvailableWidthProvider
+  ): Show[Path] = { path =>
+    val table = Table(
+      columnNames = Seq("nodeType", "tracked", "line", "method", "file"),
       rows = path.elements.map { astNode =>
         val nodeType   = astNode.getClass.getSimpleName
         val lineNumber = astNode.lineNumber.getOrElse("N/A").toString
@@ -33,7 +36,7 @@ object Path {
           case member: Member =>
             val tracked    = member.name
             val methodName = "<not-in-method>"
-            Array(nodeType, tracked, lineNumber, methodName, fileName)
+            Seq(nodeType, tracked, lineNumber, methodName, fileName)
           case cfgNode: CfgNode =>
             val method     = cfgNode.method
             val methodName = method.name
@@ -43,11 +46,12 @@ object Path {
                 s"$methodName($paramsPretty)"
               case _ => cfgNode.statement.repr
             }
-            val tracked = StringUtils.normalizeSpace(StringUtils.abbreviate(statement, 20))
-            Array(nodeType, tracked, lineNumber, methodName, fileName)
+            Seq(nodeType, statement, lineNumber, methodName, fileName)
         }
       }
-    ).render
+    )
+    // add a line break for nicer repl rendering
+    "\n" + table.render
   }
 
 }

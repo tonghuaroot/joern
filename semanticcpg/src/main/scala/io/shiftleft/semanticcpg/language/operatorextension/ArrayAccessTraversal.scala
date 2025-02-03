@@ -1,20 +1,21 @@
 package io.shiftleft.semanticcpg.language.operatorextension
 
-import io.shiftleft.codepropertygraph.generated.nodes.{Expression, Identifier}
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal._
-import overflowdb.traversal.help.Doc
+import io.shiftleft.codepropertygraph.generated.help.{Doc, Traversal}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Expression, Identifier}
+import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.codepropertygraph.generated.help.Doc
 
-class ArrayAccessTraversal(val traversal: Traversal[OpNodes.ArrayAccess]) extends AnyVal {
+@Traversal(elementType = classOf[Call])
+class ArrayAccessTraversal(val traversal: Iterator[OpNodes.ArrayAccess]) extends AnyVal {
 
   @Doc(info = "The expression representing the array")
-  def array: Traversal[Expression] = traversal.map(_.array)
+  def array: Iterator[Expression] = traversal.map(_.array)
 
   @Doc(info = "Offset at which the array is referenced (an expression)")
-  def offset: Traversal[Expression] = traversal.map(_.offset)
+  def offset: Iterator[Expression] = traversal.map(_.offset)
 
   @Doc(info = "All identifiers that are part of the offset")
-  def subscript: Traversal[Identifier] = traversal.flatMap(_.subscript)
+  def subscript: Iterator[Identifier] = traversal.flatMap(_.subscript)
 
   @Doc(
     info = "Determine whether array access has constant offset",
@@ -25,8 +26,8 @@ class ArrayAccessTraversal(val traversal: Traversal[OpNodes.ArrayAccess]) extend
         or even `buf[PROBABLY_A_CONSTANT]`.
         """
   )
-  def usesConstantOffset: Traversal[OpNodes.ArrayAccess] = traversal.filter(_.usesConstantOffset)
+  def usesConstantOffset: Iterator[OpNodes.ArrayAccess] = traversal.filter(_.usesConstantOffset)
 
   @Doc(info = "If `array` is a lone identifier, return its name")
-  def simpleName: Traversal[String] = traversal.flatMap(_.simpleName)
+  def simpleName: Iterator[String] = traversal.flatMap(_.simpleName)
 }

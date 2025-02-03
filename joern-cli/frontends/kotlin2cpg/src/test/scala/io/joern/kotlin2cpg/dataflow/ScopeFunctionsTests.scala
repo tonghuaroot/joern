@@ -2,7 +2,7 @@ package io.joern.kotlin2cpg.dataflow
 
 import io.joern.dataflowengineoss.language.toExtendedCfgNode
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) {
   implicit val resolver: ICallResolver = NoResolve
@@ -19,7 +19,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.let{ println(it) }", Some(1)),
-            ("<lambda>(it)", Some(-1)),
+            ("<lambda>0(it)", Some(1)),
             ("println(it)", Some(1))
           )
         )
@@ -38,7 +38,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.run{ println(this) }", Some(1)),
-            ("<lambda>(this)", Some(-1)),
+            ("<lambda>0(this)", Some(1)),
             ("println(this)", Some(1))
           )
         )
@@ -57,7 +57,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.also{ println(it) }", Some(1)),
-            ("<lambda>(it)", Some(-1)),
+            ("<lambda>0(it)", Some(1)),
             ("println(it)", Some(1))
           )
         )
@@ -76,7 +76,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.apply{ println(this) }", Some(1)),
-            ("<lambda>(this)", Some(-1)),
+            ("<lambda>0(this)", Some(1)),
             ("println(this)", Some(1))
           )
         )
@@ -96,7 +96,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.takeIf{ println(it); it == \"startYourEngines\" }", Some(1)),
-            ("<lambda>(it)", Some(-1)),
+            ("<lambda>0(it)", Some(1)),
             ("println(it)", Some(1))
           )
         )
@@ -116,7 +116,7 @@ class ScopeFunctionsTests extends KotlinCode2CpgFixture(withOssDataflow = true) 
           List(
             ("f1(canaryId)", Some(1)),
             ("canaryId.takeUnless{ println(it); it != \"startYourEngines\" }", Some(1)),
-            ("<lambda>(it)", Some(-1)),
+            ("<lambda>0(it)", Some(1)),
             ("println(it)", Some(1))
           )
         )

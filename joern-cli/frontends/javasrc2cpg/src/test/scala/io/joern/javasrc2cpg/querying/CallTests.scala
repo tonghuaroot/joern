@@ -6,11 +6,132 @@ import io.shiftleft.codepropertygraph.generated.edges.Ref
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators, nodes}
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, Literal, MethodParameterIn}
 import io.shiftleft.semanticcpg.language.NoResolve
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.jIteratortoTraversal
-import overflowdb.traversal.toNodeTraversal
+import io.shiftleft.semanticcpg.language.*
 
 class NewCallTests extends JavaSrcCode2CpgFixture {
+  "calls to imported methods" when {
+    "they are static methods imported from java.lang.* should be resolved" in {
+      val cpg = code("""
+                       |class Test {
+                       |  public void test() {
+                       |    String.valueOf(true);
+                       |  }
+                       |}
+                       |
+                       |""".stripMargin)
+
+      cpg.call.name("valueOf").methodFullName.l shouldBe List("java.lang.String.valueOf:java.lang.String(boolean)")
+    }
+
+    "they are instance methods imported from java.lang.* should be resolved" in {
+      val cpg = code("""
+                       |class Test {
+                       |  public void test(String s) {
+                         |  s.length();
+                       |  }
+                       |}
+                       |
+                       |""".stripMargin)
+
+      cpg.call.name("length").methodFullName.l shouldBe List("java.lang.String.length:int()")
+    }
+
+    "they are calls to instance methods from java imports should be resolved" in {
+      val cpg = code("""
+                       |import java.util.Base64;
+                       |
+                       |class Test {
+                       |  public void test(Base64.Decoder decoder, String src) {
+                       |    decoder.decode(src);
+                       |  }
+                       |}
+                       |
+                       |""".stripMargin)
+      cpg.call.name("decode").methodFullName.l shouldBe List("java.util.Base64$Decoder.decode:byte[](java.lang.String)")
+    }
+
+    "they are calls to static methods from java imports should be resolved" in {
+      val cpg = code("""
+                       |import java.util.Base64;
+                       |
+                       |class Foo {
+                       |  void test() {
+                       |    Base64.getDecoder();
+                       |  }
+                       |}
+                       |""".stripMargin)
+
+      cpg.call.name("getDecoder").methodFullName.l shouldBe List(
+        "java.util.Base64.getDecoder:java.util.Base64$Decoder()"
+      )
+    }
+  }
+
+  "calls to static methods in other files should be resolved" in {
+    val cpg = code("""
+        |package foo;
+        |
+        |class Foo {
+        |  public static String foo() {
+        |    return "FOO";
+        |  }
+        |}
+        |""".stripMargin)
+      .moreCode("""
+        |package bar;
+        |
+        |import foo.Foo;
+        |
+        |class Bar {
+        |  void test() {
+        |    Foo.foo();
+        |  }
+        |}
+        |""".stripMargin)
+
+    cpg.call.name("foo").methodFullName.l shouldBe List("foo.Foo.foo:java.lang.String()")
+  }
+
+  "calls with unresolved receivers should have the correct fullnames" in {
+    val cpg = code("""
+        |import a.*;
+        |
+        |class Test {
+        |
+        |  void test() {
+        |    foo().bar();
+        |  }
+        |}
+        |""".stripMargin)
+
+    cpg.call.name("foo").typeFullName.l shouldBe List("ANY")
+    cpg.call.name("foo").methodFullName.l shouldBe List("Test.foo:<unresolvedSignature>(0)")
+    cpg.call.name("bar").methodFullName.l shouldBe List("<unresolvedNamespace>.bar:<unresolvedSignature>(0)")
+  }
+  "calls to imported nested classes should be resolved" in {
+    lazy val cpg = code("""
+      |import foo.Foo.Bar;
+      |
+      |class Test {
+      |  void test() {
+      |    Bar.bar();
+      |  }
+      |}""".stripMargin)
+      .moreCode(
+        """
+      |package foo;
+      |
+      |public class Foo {
+      |  public class Bar {
+      |    void bar() {}
+      |  }
+      |}
+      |""".stripMargin,
+        fileName = "Foo.java"
+      )
+
+    cpg.call.name("bar").methodFullName.l shouldBe List("foo.Foo$Bar.bar:void()")
+  }
 
   "constructor init method call" should {
     lazy val cpg = code("""
@@ -32,6 +153,45 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
     "contain a call to `<init>` with one of the arguments containing a REF edge to the newly-defined local" in {
       cpg.call.nameExact("<init>").argument(0).isIdentifier.outE.collectAll[Ref].l should not be List()
     }
+  }
+
+  "calls to methods with varargs should be resolved correctly" in {
+    val cpg = code("""
+        |class Test {
+        |  void foo(String... inputs) {
+        |    System.out.println(inputs.length);
+        |  }
+        |
+        |  void test() {
+        |    foo("a", "b");
+        |  }
+        |}
+      |""".stripMargin)
+
+    cpg.call.name("foo").methodFullName.toList shouldBe List("Test.foo:void(java.lang.String[])")
+  }
+
+  "calls to static methods in other files with varargs should be resolved correctly" in {
+    val cpg = code("""
+        |class Test {
+        |
+        |  void test(String[] inputs) {
+        |    Foo.foo("a", "b");
+        |  }
+        |}
+        |""".stripMargin)
+      .moreCode(
+        """
+        |class Foo {
+        |  static void foo(String... inputs) {
+        |    System.out.println(inputs.length);
+        |  }
+        |}
+        |""".stripMargin,
+        fileName = "Foo.java"
+      )
+
+    cpg.call.name("foo").methodFullName.toList shouldBe List("Foo.foo:void(java.lang.String[])")
   }
 
   "calls to static methods in different files should be resolved correctly" in {
@@ -99,7 +259,7 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
         .argument(0)
         .l match {
         case List(thisNode: Identifier) =>
-          thisNode.outE.collectAll[Ref].map(_.inNode).l match {
+          thisNode._refOut.l match {
             case List(paramNode: MethodParameterIn) =>
               paramNode.name shouldBe "this"
               paramNode.method.fullName shouldBe s"Foo.${io.joern.x2cpg.Defines.ConstructorMethodName}:void()"
@@ -122,7 +282,7 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
 
       cpg.method.name("test").call.name("foo").argument(0).outE.collectAll[Ref].l match {
         case List(ref) =>
-          ref.inNode match {
+          ref.dst match {
             case param: MethodParameterIn =>
               param.name shouldBe "this"
               param.index shouldBe 0
@@ -147,7 +307,7 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
 
       cpg.method.name("test").call.name("foo").argument(0).outE.collectAll[Ref].l match {
         case List(ref) =>
-          ref.inNode match {
+          ref.dst match {
             case param: MethodParameterIn =>
               param.name shouldBe "this"
               param.index shouldBe 0
@@ -238,6 +398,31 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
       }
     }
 
+    "be correct for chained call interspersed with a line comment" in {
+      val cpg = code("""
+          |class Foo {
+          | private String value;
+          |
+          | public String getValue() {
+          |   return value;
+          | }
+          |
+          | public static void test() {
+          |   String s = new Foo()
+          |     // some comment
+          |     .getValue();
+          | }
+          |}
+          |""".stripMargin)
+
+      cpg.call.name("getValue").l match {
+        case List(getValueCall) =>
+          getValueCall.code shouldBe "new Foo().getValue()"
+
+        case result => fail(s"Expected single getValue call but got $result")
+      }
+    }
+
     "be correct for constructor invocations" in {
       lazy val cpg = code("""
           |class Foo {
@@ -252,6 +437,47 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
           initCall.code shouldBe "new Foo()"
 
         case result => fail(s"Expected single init call but got $result")
+      }
+    }
+
+    "be correct when there are line comments between arguments of a call" in {
+      val cpg = code("""
+          |import foo.*;
+          |public class Main {
+          |  public static void main(String[] args) {
+          |    Foo foo = Foo.create(
+          |                    "username", // hehe silly comment
+          |                    "password");
+          |    }
+          |}
+          |""".stripMargin)
+
+      cpg.call.name("create").argument.argumentIndexGt(0).l match {
+        case List(username: Literal, password: Literal) =>
+          username.code shouldBe "\"username\""
+          password.code shouldBe "\"password\""
+        case result => fail(s"Expected two arguments but got $result")
+      }
+    }
+
+    "be correct when there are multi-line comments between arguments of a call" in {
+      val cpg = code("""
+          |import foo.*;
+          |public class Main {
+          |  public static void main(String[] args) {
+          |    Foo foo = Foo.create(
+          |                    // another comment
+          |                    "username", /* hehe silly comment */
+          |                    "password");
+          |    }
+          |}
+          |""".stripMargin)
+
+      cpg.call.name("create").argument.argumentIndexGt(0).l match {
+        case List(username: Literal, password: Literal) =>
+          username.code shouldBe "\"username\""
+          password.code shouldBe "\"password\""
+        case result => fail(s"Expected two arguments but got $result")
       }
     }
   }
@@ -328,6 +554,66 @@ class NewCallTests extends JavaSrcCode2CpgFixture {
       superReceiver.argumentIndex shouldBe 0
       superReceiver.lineNumber shouldBe Some(5)
       superReceiver.columnNumber shouldBe Some(12)
+    }
+  }
+
+  "call to method in derived class using external package" should {
+    lazy val cpg = code("""
+        |import org.hibernate.Query;
+        |import org.hibernate.Session;
+        |import org.hibernate.SessionFactory;
+        |
+        |class Base {
+        |  Session getCurrentSession() {
+        |		return this.sessionFactory.getCurrentSession();
+        |	}
+        |}
+        |
+        |class Derived extends Base{
+        | void foo() {
+        |		Query q = getCurrentSession().createQuery("FROM User");
+        |		return;
+        |	}
+        |}
+        |""".stripMargin)
+
+    "have correct methodFullName" in {
+      cpg.call.nameExact("createQuery").methodFullName.head.split(":").head shouldBe "org.hibernate.Session.createQuery"
+      cpg.call
+        .nameExact("getCurrentSession")
+        .methodFullName
+        .last shouldBe "Derived.getCurrentSession:org.hibernate.Session()"
+    }
+  }
+
+  "call to external method in a builder-like pattern" should {
+    val cpg = code("""
+        |package example;
+        |import org.Builder;
+        |import org.Client;
+        |
+        |class Main {
+        | static void main(String[] args) {
+        |   Client foo = new Builder().foo().buildClient(); // 8
+        |   new Builder().somethingElse().buildClient();    // 9
+        | }
+        |}
+        |""".stripMargin)
+
+    "have correct method full name for `buildClient` call on line 8" in {
+      cpg.call("buildClient").lineNumber(8).l match {
+        case List(buildClient) =>
+          buildClient.methodFullName shouldBe "<unresolvedNamespace>.buildClient:<unresolvedSignature>(0)"
+        case result => fail(s"Expected single buildClient call but got $result")
+      }
+    }
+
+    "have correct method full name for `buildClient` call on line 9" in {
+      cpg.call("buildClient").lineNumber(9).l match {
+        case List(buildClient) =>
+          buildClient.methodFullName shouldBe "<unresolvedNamespace>.buildClient:<unresolvedSignature>(0)"
+        case result => fail(s"Expected single buildClient call but got $result")
+      }
     }
   }
 }
@@ -454,7 +740,7 @@ class CallTests extends JavaSrcCode2CpgFixture {
     call.signature shouldBe "java.lang.String(java.lang.String)"
     call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
 
-    val List(objName: Identifier, argument: Literal) = call.astChildren.l
+    val List(objName: Identifier, argument: Literal) = call.astChildren.l: @unchecked
 
     objName.order shouldBe 1
     objName.argumentIndex shouldBe 0
@@ -475,7 +761,7 @@ class CallTests extends JavaSrcCode2CpgFixture {
     call.signature shouldBe "java.lang.String(test.MyObject)"
     call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
 
-    val List(identifier: Identifier, argument: Call) = call.argument.l
+    val List(identifier: Identifier, argument: Call) = call.argument.l: @unchecked
     identifier.order shouldBe 1
     identifier.argumentIndex shouldBe 0
     identifier.code shouldBe "this"
@@ -484,7 +770,7 @@ class CallTests extends JavaSrcCode2CpgFixture {
     argument.name shouldBe Operators.fieldAccess
     argument.typeFullName shouldBe "test.MyObject"
 
-    val List(ident: Identifier, fieldIdent: FieldIdentifier) = argument.argument.l
+    val List(ident: Identifier, fieldIdent: FieldIdentifier) = argument.argument.l: @unchecked
     ident.name shouldBe "this"
     fieldIdent.canonicalName shouldBe "obj"
   }
@@ -498,7 +784,7 @@ class CallTests extends JavaSrcCode2CpgFixture {
     call.signature shouldBe "java.lang.String(test.MyObject)"
     call.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
 
-    val List(objName: Identifier, argument: Call) = call.astChildren.l
+    val List(objName: Identifier, argument: Call) = call.astChildren.l: @unchecked
 
     objName.order shouldBe 1
     objName.argumentIndex shouldBe 0
@@ -511,7 +797,7 @@ class CallTests extends JavaSrcCode2CpgFixture {
     argument.order shouldBe 2
     argument.argumentIndex shouldBe 1
 
-    val List(ident: Identifier, fieldIdent: FieldIdentifier) = argument.argument.l
+    val List(ident: Identifier, fieldIdent: FieldIdentifier) = argument.argument.l: @unchecked
     ident.name shouldBe "this"
     fieldIdent.canonicalName shouldBe "obj"
   }

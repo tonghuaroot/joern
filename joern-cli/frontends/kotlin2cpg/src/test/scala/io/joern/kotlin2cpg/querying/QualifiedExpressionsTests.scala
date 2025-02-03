@@ -2,7 +2,7 @@ package io.joern.kotlin2cpg.querying
 
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class QualifiedExpressionsTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
   "CPG for code with qualified expression with QE as a receiver" should {
@@ -23,6 +23,20 @@ class QualifiedExpressionsTests extends KotlinCode2CpgFixture(withOssDataflow = 
     "should contain a CALL node for the DQE inside the DQE with the correct METHOD_FULL_NAME set" in {
       val List(c) = cpg.call.code("Runtime.getRuntime\\(\\)").l
       c.methodFullName shouldBe "java.lang.Runtime.getRuntime:java.lang.Runtime()"
+    }
+  }
+
+  "CPG for code with chained qualified expressions" should {
+    val cpg = code("""
+        |fun main() {
+        |      val out = StringBuilder().append("one").append("-two").toString()
+        |      println(out)
+        |}
+        |""".stripMargin)
+
+    "should contain a CALL node for the long DQE with the correct METHOD_FULL_NAME set" in {
+      val List(c) = cpg.call.codeExact("StringBuilder().append(\"one\")").l
+      c.methodFullName shouldBe "java.lang.StringBuilder.append:java.lang.StringBuilder(java.lang.String)"
     }
   }
 

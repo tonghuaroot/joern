@@ -1,39 +1,33 @@
 import scala.sys.process._
 import scala.util.Properties.isWin
+import better.files.File
 
 name := "php2cpg"
 
-scalaVersion       := "2.13.8"
-crossScalaVersions := Seq("2.13.8", "3.2.2")
+val upstreamParserBinName  = "php-parser.phar"
+val versionedParserBinName = s"php-parser-${Versions.phpParser}.phar"
+val phpParserDlUrl =
+  s"https://github.com/joernio/PHP-Parser/releases/download/v${Versions.phpParser}/$upstreamParserBinName"
 
-dependsOn(Projects.dataflowengineoss, Projects.x2cpg % "compile->compile;test->test")
+dependsOn(Projects.dataflowengineoss % "compile->compile;test->test", Projects.x2cpg % "compile->compile;test->test")
 
 libraryDependencies ++= Seq(
-  "com.lihaoyi"   %% "ujson"             % "2.0.0",
-  "com.lihaoyi"   %% "upickle"           % "2.0.0",
-  "io.shiftleft"  %% "codepropertygraph" % Versions.cpg,
-  "org.scalatest" %% "scalatest"         % Versions.scalatest % Test,
-  "io.circe"      %% "circe-core"        % "0.15.0-M1"
-)
-
-scalacOptions ++= Seq(
-  "-deprecation" // Emit warning and location for usages of deprecated APIs.
+  "com.lihaoyi"       %% "upickle"             % Versions.upickle,
+  "com.lihaoyi"       %% "ujson"               % Versions.upickle,
+  "io.shiftleft"      %% "codepropertygraph"   % Versions.cpg,
+  "com.github.sh4869" %% "semver-parser-scala" % Versions.semverParser,
+  "org.scalatest"     %% "scalatest"           % Versions.scalatest % Test
 )
 
 lazy val phpParseInstallTask = taskKey[Unit]("Install PHP-Parse using PHP Composer")
 phpParseInstallTask := {
-  val phpBinDir      = baseDirectory.value / "bin"
-  val phpParseBinary = phpBinDir / "vendor" / "bin" / "php-parse"
-  if (!phpParseBinary.exists) {
-    val installSciptPath =
-      if (isWin)
-        (phpBinDir / "installdeps.bat").getPath
-      else
-        (phpBinDir / "installdeps.sh").getPath
-    Process(installSciptPath, phpBinDir) !
-  }
+  val phpBinDir = baseDirectory.value / "bin" / "php-parser"
+  DownloadHelper.ensureIsAvailable(phpParserDlUrl, phpBinDir / versionedParserBinName)
+  File((phpBinDir / "php-parser.php").getPath)
+    .createFileIfNotExists()
+    .overwrite(s"<?php\nrequire('$versionedParserBinName');?>")
 
-  val distDir = (Universal / stagingDirectory).value / "bin"
+  val distDir = (Universal / stagingDirectory).value / "bin" / "php-parser"
   distDir.mkdirs()
   IO.copyDirectory(phpBinDir, distDir)
 }
@@ -42,3 +36,7 @@ Compile / compile := ((Compile / compile) dependsOn phpParseInstallTask).value
 
 enablePlugins(JavaAppPackaging, LauncherJarPlugin)
 Global / onChangedBuildSource := ReloadOnSourceChanges
+
+/** write the php parser version to the manifest for downstream usage */
+Compile / packageBin / packageOptions +=
+  Package.ManifestAttributes(new java.util.jar.Attributes.Name("PHP-Parser-Version") -> Versions.phpParser)

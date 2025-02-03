@@ -1,5 +1,5 @@
 package io.joern.pythonparser
-import io.joern.pythonparser.ast._
+import io.joern.pythonparser.ast.*
 import scala.collection.immutable
 
 class AstPrinter(indentStr: String) extends AstVisitor[String] {
@@ -15,6 +15,14 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
     indentStr + printStr.replaceAll(ls, ls + indentStr)
   }
 
+  private def printTypeParams(typeParams: CollType[itypeParam]): String = {
+    if (typeParams.nonEmpty) {
+      "[" + typeParams.map(print).mkString(", ") + "]"
+    } else {
+      ""
+    }
+  }
+
   override def visit(ast: iast): String = ???
 
   override def visit(mod: imod): String = ???
@@ -27,7 +35,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
 
   override def visit(functionDef: FunctionDef): String = {
     functionDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
-      "def " + functionDef.name + "(" + print(functionDef.args) + ")" +
+      "def " + functionDef.name + printTypeParams(functionDef.type_params) + "(" + print(functionDef.args) + ")" +
       functionDef.returns.map(r => " -> " + print(r)).getOrElse("") +
       ":" + functionDef.body.map(printIndented).mkString(ls, ls, "")
 
@@ -35,7 +43,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
 
   override def visit(functionDef: AsyncFunctionDef): String = {
     functionDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
-      "async def " + functionDef.name + "(" + print(functionDef.args) + ")" +
+      "async def " + functionDef.name + printTypeParams(functionDef.type_params) + "(" + print(functionDef.args) + ")" +
       functionDef.returns.map(r => " -> " + print(r)).getOrElse("") +
       ":" + functionDef.body.map(printIndented).mkString(ls, ls, "")
 
@@ -45,7 +53,7 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
     val optionArgEndComma = if (classDef.bases.nonEmpty && classDef.keywords.nonEmpty) ", " else ""
 
     classDef.decorator_list.map(d => "@" + print(d) + ls).mkString("") +
-      "class " + classDef.name +
+      "class " + classDef.name + printTypeParams(classDef.type_params) +
       "(" +
       classDef.bases.map(print).mkString(", ") +
       optionArgEndComma +
@@ -64,6 +72,10 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
 
   override def visit(assign: Assign): String = {
     assign.targets.map(print).mkString("", " = ", " = ") + print(assign.value)
+  }
+
+  override def visit(typeAlias: TypeAlias): String = {
+    "type " + print(typeAlias.name) + printTypeParams(typeAlias.type_params) + " = " + print(typeAlias.value)
   }
 
   override def visit(annAssign: AnnAssign): String = {
@@ -129,6 +141,17 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
   override def visit(withStmt: AsyncWith): String = {
     "async with " + withStmt.items.map(print).mkString(", ") + ":" +
       withStmt.body.map(printIndented).mkString(ls, ls, "")
+  }
+
+  override def visit(matchStmt: Match): String = {
+    val subjectSuffix = matchStmt.subject match {
+      case _: Starred =>
+        ","
+      case _ =>
+        ""
+    }
+    "match " + print(matchStmt.subject) + subjectSuffix + ":" +
+      matchStmt.cases.map(printIndented).mkString(ls, ls, "")
   }
 
   override def visit(raise: Raise): String = {
@@ -653,6 +676,81 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
     print(withItem.context_expr) + withItem.optional_vars.map(o => " as " + print(o)).getOrElse("")
   }
 
+  override def visit(matchCase: MatchCase): String = {
+    "case " + print(matchCase.pattern) + matchCase.guard.map(g => " if " + print(g)).getOrElse("") + ":" +
+      matchCase.body.map(printIndented).mkString(ls, ls, "")
+  }
+
+  override def visit(matchValue: MatchValue): String = {
+    print(matchValue.value)
+  }
+
+  override def visit(matchSingleton: MatchSingleton): String = {
+    print(matchSingleton.value)
+  }
+
+  override def visit(matchSequence: MatchSequence): String = {
+    matchSequence.patterns.map(print).mkString("[", ", ", "]")
+  }
+
+  override def visit(matchMapping: MatchMapping): String = {
+    "{" + matchMapping.keys
+      .zip(matchMapping.patterns)
+      .map { case (key, pattern) =>
+        print(key) + ": " + print(pattern)
+      }
+      .mkString(", ") +
+      matchMapping.rest
+        .map { r =>
+          val separatorString =
+            if (matchMapping.keys.nonEmpty) {
+              ", "
+            } else {
+              ""
+            }
+          separatorString + "**" + r
+        }
+        .getOrElse("") + "}"
+  }
+
+  override def visit(matchClass: MatchClass): String = {
+    val separatorString =
+      if (matchClass.patterns.nonEmpty && matchClass.kwd_patterns.nonEmpty) {
+        ", "
+      } else {
+        ""
+      }
+
+    print(matchClass.cls) +
+      "(" +
+      matchClass.patterns.map(print).mkString(", ") +
+      separatorString +
+      matchClass.kwd_attrs
+        .zip(matchClass.kwd_patterns)
+        .map { case (name, pattern) =>
+          name + " = " + print(pattern)
+        }
+        .mkString(", ") +
+      ")"
+  }
+
+  override def visit(matchStar: MatchStar): String = {
+    "*" + matchStar.name.getOrElse("_")
+  }
+
+  override def visit(matchAs: MatchAs): String = {
+    matchAs.pattern match {
+      case Some(pattern) =>
+        print(pattern) + matchAs.name.map(name => " as " + name).getOrElse("")
+      case None =>
+        matchAs.name.getOrElse("_")
+    }
+  }
+
+  override def visit(matchOr: MatchOr): String = {
+    matchOr.patterns.map(print).mkString(" | ")
+  }
+
   override def visit(comprehension: Comprehension): String = {
     val prefix =
       if (comprehension.is_async) {
@@ -667,5 +765,17 @@ class AstPrinter(indentStr: String) extends AstVisitor[String] {
 
   override def visit(typeIgnore: TypeIgnore): String = {
     typeIgnore.tag
+  }
+
+  override def visit(typeVar: TypeVar): String = {
+    typeVar.name + typeVar.bound.map(b => ": " + print(b)).getOrElse("")
+  }
+
+  override def visit(paramSpec: ParamSpec): String = {
+    "**" + paramSpec.name
+  }
+
+  override def visit(typeVarTuple: TypeVarTuple): String = {
+    "*" + typeVarTuple.name
   }
 }

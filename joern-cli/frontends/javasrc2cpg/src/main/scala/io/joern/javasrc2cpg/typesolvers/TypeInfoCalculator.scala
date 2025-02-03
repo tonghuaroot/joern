@@ -7,19 +7,21 @@ import com.github.javaparser.resolution.declarations.{
   ResolvedTypeDeclaration,
   ResolvedTypeParameterDeclaration
 }
-import com.github.javaparser.resolution.types._
+import com.github.javaparser.resolution.logic.InferenceVariableType
+import com.github.javaparser.resolution.model.typesystem.{LazyType, NullType}
+import com.github.javaparser.resolution.types.*
 import com.github.javaparser.resolution.types.parametrization.ResolvedTypeParametersMap
-import com.github.javaparser.symbolsolver.logic.InferenceVariableType
-import com.github.javaparser.symbolsolver.model.typesystem.{LazyType, NullType}
+import com.github.javaparser.symbolsolver.javaparsermodel.declarations.JavaParserRecordDeclaration
 import io.joern.javasrc2cpg.typesolvers.TypeInfoCalculator.{TypeConstants, TypeNameConstants}
 import io.joern.x2cpg.datastructures.Global
 import org.slf4j.LoggerFactory
 
-import scala.jdk.CollectionConverters._
+import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.RichOptional
-import scala.util.Try
+import scala.util.{Failure, Try}
 
-class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
+class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver, keepTypeArguments: Boolean) {
   private val logger               = LoggerFactory.getLogger(this.getClass)
   private val emptyTypeParamValues = ResolvedTypeParametersMap.empty()
 
@@ -37,6 +39,10 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
 
   def fullName(typ: ResolvedType, typeParamValues: ResolvedTypeParametersMap): Option[String] = {
     nameOrFullName(typ, typeParamValues, fullyQualified = true).map(registerType)
+  }
+
+  def fullNameWithoutRegistering(typ: ResolvedType): Option[String] = {
+    nameOrFullName(typ, emptyTypeParamValues, fullyQualified = true)
   }
 
   private def typesSubstituted(
@@ -67,10 +73,16 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
     fullyQualified: Boolean
   ): Option[String] = {
     typ match {
+      case refType: ResolvedReferenceType if keepTypeArguments =>
+        val typeParams = refType.getTypeParametersMap.asScala.map(_.b).map(fullName(_).getOrElse(TypeConstants.Object))
+        nameOrFullName(refType.getTypeDeclaration.get, fullyQualified).map {
+          case baseType if typeParams.isEmpty => baseType
+          case baseType                       => s"$baseType<${typeParams.mkString(",")}>"
+        }
       case refType: ResolvedReferenceType =>
         nameOrFullName(refType.getTypeDeclaration.get, fullyQualified)
       case lazyType: LazyType =>
-        lazyType match {
+        Try(lazyType match {
           case _ if lazyType.isReferenceType =>
             nameOrFullName(lazyType.asReferenceType(), typeParamValues, fullyQualified)
           case _ if lazyType.isTypeVariable =>
@@ -81,7 +93,7 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
             nameOrFullName(lazyType.asPrimitive(), typeParamValues, fullyQualified)
           case _ if lazyType.isWildcard =>
             nameOrFullName(lazyType.asWildcard(), typeParamValues, fullyQualified)
-        }
+        }).toOption.flatten
       case tpe @ (_: ResolvedVoidType | _: ResolvedPrimitiveType) =>
         Some(tpe.describe())
       case arrayType: ResolvedArrayType =>
@@ -97,7 +109,15 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
         } else {
           val extendsBoundOption = Try(typeParamDecl.getBounds.asScala.find(_.isExtends)).toOption.flatten
           extendsBoundOption
-            .flatMap(bound => nameOrFullName(bound.getType, typeParamValues, fullyQualified))
+            .flatMap(bound =>
+              Try(bound.getType)
+                .recoverWith(throwable => {
+                  logger.debug("Error getting bound type", throwable)
+                  Failure(throwable)
+                })
+                .toOption
+            )
+            .flatMap(boundType => nameOrFullName(boundType, typeParamValues, fullyQualified))
             .orElse(objectType(fullyQualified))
         }
       case lambdaConstraintType: ResolvedLambdaConstraintType =>
@@ -162,6 +182,10 @@ class TypeInfoCalculator(global: Global, symbolResolver: SymbolResolver) {
 
   def fullName(decl: ResolvedDeclaration): Option[String] = {
     nameOrFullName(decl, fullyQualified = true).map(registerType)
+  }
+
+  def fullNameWithoutRegistering(decl: ResolvedDeclaration): Option[String] = {
+    nameOrFullName(decl, fullyQualified = true)
   }
 
   private def nameOrFullName(decl: ResolvedDeclaration, fullyQualified: Boolean): Option[String] = {
@@ -236,6 +260,8 @@ object TypeInfoCalculator {
     val Object: String   = "java.lang.Object"
     val Class: String    = "java.lang.Class"
     val Iterator: String = "java.util.Iterator"
+    val Enum: String     = "java.lang.Enum"
+    val Record: String   = "java.lang.Record"
     val Void: String     = "void"
     val Any: String      = "ANY"
   }
@@ -281,7 +307,4 @@ object TypeInfoCalculator {
     "java.lang.Boolean"
   )
 
-  def apply(global: Global, symbolResolver: SymbolResolver): TypeInfoCalculator = {
-    new TypeInfoCalculator(global, symbolResolver)
-  }
 }

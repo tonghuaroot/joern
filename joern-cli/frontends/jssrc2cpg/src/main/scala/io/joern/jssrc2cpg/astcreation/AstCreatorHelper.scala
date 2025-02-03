@@ -1,33 +1,28 @@
 package io.joern.jssrc2cpg.astcreation
 
-import io.joern.jssrc2cpg.datastructures._
-import io.joern.jssrc2cpg.parser.BabelAst._
+import io.joern.jssrc2cpg.datastructures.*
+import io.joern.jssrc2cpg.parser.BabelAst.*
 import io.joern.jssrc2cpg.parser.BabelNodeInfo
-import io.joern.jssrc2cpg.passes.Defines
-import io.joern.x2cpg.Ast
-import io.shiftleft.codepropertygraph.generated.nodes.NewNode
-import io.shiftleft.codepropertygraph.generated.EdgeTypes
-import io.shiftleft.codepropertygraph.generated.nodes.NewIdentifier
-import io.shiftleft.codepropertygraph.generated.nodes.NewNamespaceBlock
-import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
-import io.shiftleft.codepropertygraph.generated.nodes.NewTypeRef
-import org.apache.commons.lang.StringUtils
+import io.joern.x2cpg.frontendspecific.jssrc2cpg.Defines
+import io.joern.x2cpg.utils.IntervalKeyPool
+import io.joern.x2cpg.utils.NodeBuilders.{newClosureBindingNode, newLocalNode}
+import io.joern.x2cpg.{Ast, ValidationMode}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.{EdgeTypes, EvaluationStrategies}
+import io.shiftleft.codepropertygraph.generated.nodes.File.PropertyDefaults
 import ujson.Value
 
-import scala.collection.mutable
-import scala.collection.SortedMap
-import scala.jdk.CollectionConverters.EnumerationHasAsScala
-import scala.util.Success
-import scala.util.Try
+import scala.collection.{mutable, SortedMap}
+import scala.util.{Success, Try}
 
-trait AstCreatorHelper { this: AstCreator =>
+trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: AstCreator =>
 
-  // maximum length of code fields in number of characters
-  private val MaxCodeLength: Int = 1000
-  private val MinCodeLength: Int = 50
+  private val anonClassKeyPool = new IntervalKeyPool(first = 0, last = Long.MaxValue)
+
+  protected def nextAnonClassName(): String = s"<anon-class>${anonClassKeyPool.next}"
 
   protected def createBabelNodeInfo(json: Value): BabelNodeInfo = {
-    val c     = shortenCode(code(json))
+    val c     = code(json)
     val ln    = line(json)
     val cn    = column(json)
     val lnEnd = lineEnd(json)
@@ -39,22 +34,17 @@ trait AstCreatorHelper { this: AstCreator =>
   protected def notHandledYet(node: BabelNodeInfo): Ast = {
     val text =
       s"""Node type '${node.node}' not handled yet!
-         |  Code: '${shortenCode(node.code, length = 50)}'
+         |  Code: '${node.code}'
          |  File: '${parserResult.fullPath}'
          |  Line: ${node.lineNumber.getOrElse(-1)}
          |  Column: ${node.columnNumber.getOrElse(-1)}
          |  """.stripMargin
     logger.info(text)
-    Ast(newUnknown(node))
+    Ast(unknownNode(node, node.code))
   }
 
-  protected def registerType(typeName: String, typeFullName: String): Unit = {
-    if (usedTypes.containsKey((typeName, typeName)) && typeName != typeFullName) {
-      usedTypes.put((typeName, typeFullName), true)
-      usedTypes.remove((typeName, typeName))
-    } else if (!usedTypes.keys().asScala.exists { case (tpn, _) => tpn == typeName }) {
-      usedTypes.putIfAbsent((typeName, typeFullName), true)
-    }
+  protected def registerType(typeFullName: String): Unit = {
+    global.usedTypes.putIfAbsent(typeFullName, true)
   }
 
   private def nodeType(node: Value): BabelNode = fromString(node("type").str)
@@ -68,9 +58,9 @@ trait AstCreatorHelper { this: AstCreator =>
     defaultName
       .orElse(codeForBabelNodeInfo(nodeInfo).headOption)
       .getOrElse {
-        val tmpName   = generateUnusedVariableName(usedVariableNames, "_tmp")
-        val localNode = createLocalNode(tmpName, Defines.Any)
-        diffGraph.addEdge(localAstParentStack.head, localNode, EdgeTypes.AST)
+        val tmpName    = generateUnusedVariableName(usedVariableNames, "_tmp")
+        val nLocalNode = localNode(nodeInfo, tmpName, tmpName, Defines.Any).order(0)
+        diffGraph.addEdge(localAstParentStack.head, nLocalNode, EdgeTypes.AST)
         tmpName
       }
   }
@@ -86,13 +76,13 @@ trait AstCreatorHelper { this: AstCreator =>
   }
 
   protected def code(node: Value): String = {
-    val startIndex = start(node).getOrElse(0)
-    val endIndex   = Math.min(end(node).getOrElse(0), parserResult.fileContent.length)
-    parserResult.fileContent.substring(startIndex, endIndex).trim
+    nodeOffsets(node) match {
+      case Some((startOffset, endOffset)) =>
+        shortenCode(parserResult.fileContent.substring(startOffset, endOffset).trim)
+      case _ =>
+        PropertyDefaults.Code
+    }
   }
-
-  private def shortenCode(code: String, length: Int = MaxCodeLength): String =
-    StringUtils.abbreviate(code, math.max(MinCodeLength, length))
 
   protected def hasKey(node: Value, key: String): Boolean = Try(node(key)).isSuccess
 
@@ -102,26 +92,26 @@ trait AstCreatorHelper { this: AstCreator =>
   protected def safeBool(node: Value, key: String): Option[Boolean] =
     if (hasKey(node, key)) Try(node(key).bool).toOption else None
 
-  protected def safeObj(node: Value, key: String): Option[mutable.LinkedHashMap[String, Value]] = Try(
+  protected def safeObj(node: Value, key: String): Option[upickle.core.LinkedHashMap[String, Value]] = Try(
     node(key).obj
   ) match {
     case Success(value) if value.nonEmpty => Option(value)
     case _                                => None
   }
 
-  private def start(node: Value): Option[Int] = Try(node("start").num.toInt).toOption
+  protected def start(node: Value): Option[Int] = Try(node("start").num.toInt).toOption
 
-  private def end(node: Value): Option[Int] = Try(node("end").num.toInt).toOption
+  protected def end(node: Value): Option[Int] = Try(node("end").num.toInt).toOption
 
   protected def pos(node: Value): Option[Int] = Try(node("start").num.toInt).toOption
 
-  protected def line(node: Value): Option[Integer] = start(node).map(getLineOfSource)
+  protected def line(node: Value): Option[Int] = start(node).map(getLineOfSource)
 
-  protected def lineEnd(node: Value): Option[Integer] = end(node).map(getLineOfSource)
+  protected def lineEnd(node: Value): Option[Int] = end(node).map(getLineOfSource)
 
-  protected def column(node: Value): Option[Integer] = start(node).map(getColumnOfSource)
+  protected def column(node: Value): Option[Int] = start(node).map(getColumnOfSource)
 
-  protected def columnEnd(node: Value): Option[Integer] = end(node).map(getColumnOfSource)
+  protected def columnEnd(node: Value): Option[Int] = end(node).map(getColumnOfSource)
 
   // Returns the line number for a given position in the source.
   private def getLineOfSource(position: Int): Int = {
@@ -167,14 +157,22 @@ trait AstCreatorHelper { this: AstCreator =>
       .collect { case methodScopeElement: MethodScopeElement => methodScopeElement.name }
       .mkString(":")
 
+  private def isMethodOrGetSet(func: BabelNodeInfo): Boolean = {
+    if (hasKey(func.json, "kind") && !func.json("kind").isNull) {
+      val t = func.json("kind").str
+      t == "method" || t == "get" || t == "set"
+    } else false
+  }
+
   private def calcMethodName(func: BabelNodeInfo): String = func.node match {
-    case TSCallSignatureDeclaration      => "anonymous"
+    case ObjectMethod if isMethodOrGetSet(func) && code(func.json("key")).startsWith("'") => nextClosureName()
+    case TSCallSignatureDeclaration                                                       => nextClosureName()
     case TSConstructSignatureDeclaration => io.joern.x2cpg.Defines.ConstructorMethodName
-    case _ if safeStr(func.json, "kind").contains("method") =>
+    case _ if isMethodOrGetSet(func) =>
       if (hasKey(func.json("key"), "name")) func.json("key")("name").str
       else code(func.json("key"))
     case _ if safeStr(func.json, "kind").contains("constructor") => io.joern.x2cpg.Defines.ConstructorMethodName
-    case _ if func.json("id").isNull                             => "anonymous"
+    case _ if func.json("id").isNull                             => nextClosureName()
     case _                                                       => func.json("id")("name").str
   }
 
@@ -218,21 +216,16 @@ trait AstCreatorHelper { this: AstCreator =>
     */
   private def calcTypeName(classNode: BabelNodeInfo): String =
     if (hasKey(classNode.json, "id") && !classNode.json("id").isNull) code(classNode.json("id"))
-    else "_anon_cdecl"
+    else nextAnonClassName()
 
   protected def calcTypeNameAndFullName(
     classNode: BabelNodeInfo,
     preCalculatedName: Option[String] = None
   ): (String, String) = {
-    val name             = preCalculatedName.getOrElse(calcTypeName(classNode))
-    val fullNamePrefix   = s"${parserResult.filename}:${computeScopePath(scope.getScopeHead)}:"
-    val intendedFullName = s"$fullNamePrefix$name"
-    val postfix          = typeFullNameToPostfix.getOrElse(intendedFullName, 0)
-    val resultingFullName =
-      if (postfix == 0) intendedFullName
-      else s"$intendedFullName$postfix"
-    typeFullNameToPostfix.put(intendedFullName, postfix + 1)
-    (name, resultingFullName)
+    val name           = preCalculatedName.getOrElse(calcTypeName(classNode))
+    val fullNamePrefix = s"${parserResult.filename}:${computeScopePath(scope.getScopeHead)}:"
+    val fullName       = s"$fullNamePrefix$name"
+    (name, fullName)
   }
 
   protected def createVariableReferenceLinks(): Unit = {
@@ -269,9 +262,13 @@ trait AstCreatorHelper { this: AstCreator =>
                   case None =>
                     val methodScopeNode = methodScope.scopeNode
                     val localNode =
-                      createLocalNode(origin.variableName, Defines.Any, Option(closureBindingIdProperty))
+                      newLocalNode(origin.variableName, Defines.Any, Option(closureBindingIdProperty)).order(0)
                     diffGraph.addEdge(methodScopeNode, localNode, EdgeTypes.AST)
-                    val closureBindingNode = createClosureBindingNode(closureBindingIdProperty, origin.variableName)
+                    val closureBindingNode = newClosureBindingNode(
+                      closureBindingIdProperty,
+                      origin.variableName,
+                      EvaluationStrategies.BY_REFERENCE
+                    )
                     methodScope.capturingRefId.foreach(ref =>
                       diffGraph.addEdge(ref, closureBindingNode, EdgeTypes.CAPTURE)
                     )
@@ -301,7 +298,7 @@ trait AstCreatorHelper { this: AstCreator =>
     methodScopeNodeId: NewNode,
     variableName: String
   ): (NewNode, ScopeType) = {
-    val local = createLocalNode(variableName, Defines.Any)
+    val local = newLocalNode(variableName, Defines.Any).order(0)
     diffGraph.addEdge(methodScopeNodeId, local, EdgeTypes.AST)
     (local, MethodScope)
   }

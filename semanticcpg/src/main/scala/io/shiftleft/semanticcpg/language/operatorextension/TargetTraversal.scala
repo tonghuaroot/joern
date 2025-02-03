@@ -1,11 +1,12 @@
 package io.shiftleft.semanticcpg.language.operatorextension
 
+import io.shiftleft.codepropertygraph.generated.help.{Doc, Traversal}
 import io.shiftleft.codepropertygraph.generated.nodes.Expression
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal._
-import overflowdb.traversal.help.Doc
+import io.shiftleft.semanticcpg.language.*
+import io.shiftleft.codepropertygraph.generated.help.Doc
 
-class TargetTraversal(val traversal: Traversal[Expression]) extends AnyVal {
+@Traversal(elementType = classOf[Expression])
+class TargetTraversal(val traversal: Iterator[Expression]) extends AnyVal {
 
   @Doc(
     info = "Outer-most array access",
@@ -14,9 +15,9 @@ class TargetTraversal(val traversal: Traversal[Expression]) extends AnyVal {
         is returned, but not b(c) alone.
         """
   )
-  def arrayAccess: Traversal[OpNodes.ArrayAccess] = traversal.flatMap(_.arrayAccess)
+  def arrayAccess: Iterator[OpNodes.ArrayAccess] = traversal.flatMap(_.arrayAccess)
 
   @Doc(info = "Returns 'pointer' in assignments of the form *(pointer) = x")
-  def pointer: Traversal[Expression] = traversal.flatMap(_.pointer)
+  def pointer: Iterator[Expression] = traversal.flatMap(_.pointer)
 
 }

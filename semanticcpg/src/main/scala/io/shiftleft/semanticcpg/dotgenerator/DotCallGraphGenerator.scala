@@ -1,13 +1,12 @@
 package io.shiftleft.semanticcpg.dotgenerator
 
-import io.shiftleft.codepropertygraph.Cpg
-import overflowdb.traversal._
+import io.shiftleft.codepropertygraph.generated.Cpg
 
 object DotCallGraphGenerator {
 
-  def dotCallGraph(cpg: Cpg): Traversal[String] = {
+  def dotCallGraph(cpg: Cpg): Iterator[String] = {
     val callGraph = new CallGraphGenerator().generate(cpg)
-    Traversal(DotSerializer.dotGraph(None, callGraph))
+    Iterator(DotSerializer.dotGraph(None, callGraph))
   }
 
 }

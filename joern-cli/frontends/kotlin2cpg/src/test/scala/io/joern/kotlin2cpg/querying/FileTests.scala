@@ -1,7 +1,7 @@
 package io.joern.kotlin2cpg.querying
 
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.FileTraversal
 
 import java.io.File
@@ -38,11 +38,11 @@ class FileTests extends KotlinCode2CpgFixture(withOssDataflow = false) {
         .name(".*.kt".replace("/", s"\\${File.separator}"))
         .method
         .name
-        .toSet shouldBe Set("baz", io.joern.x2cpg.Defines.ConstructorMethodName, "add")
+        .toSet shouldBe Set("<global>", "baz", io.joern.x2cpg.Defines.ConstructorMethodName, "add")
     }
 
     "should allow traversing from file to its type declarations" in {
-      cpg.file.nameNot(FileTraversal.UNKNOWN).typeDecl.name.toSet shouldBe Set("Foo")
+      cpg.file.nameNot(FileTraversal.UNKNOWN).typeDecl.name.sorted.toSet shouldBe Set("add", "baz", "Foo", "<global>")
     }
   }
 }

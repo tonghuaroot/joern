@@ -1,12 +1,116 @@
 package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, ModifierTypes, Operators, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, ModifierTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{Call, FieldIdentifier, Identifier, Literal, Member}
-import io.shiftleft.semanticcpg.language._
-import org.scalatest.Ignore
+import io.shiftleft.semanticcpg.language.*
 
 class NewMemberTests extends JavaSrcCode2CpgFixture {
+  "locals shadowing members" should {
+    val cpg = code("""
+                     |public class Foo {
+                     |  Integer value = 12;
+                     |
+                     |  static void foo() {
+                     |    String value = "Hello";
+                     |    value.trim();
+                     |  }
+                     |}
+                     |""".stripMargin)
+
+    "use the local type for calls" in {
+      cpg.call.name("trim").methodFullName.toList shouldBe List("java.lang.String.trim:java.lang.String()")
+    }
+  }
+
+  "parameters shadowing members" should {
+    val cpg = code("""
+                     |public class Foo {
+                     |  Integer value = 12;
+                     |
+                     |  static void foo(String value) {
+                     |    value.trim();
+                     |  }
+                     |}
+                     |""".stripMargin)
+
+    "use the local type for calls" in {
+      cpg.call.name("trim").methodFullName.toList shouldBe List("java.lang.String.trim:java.lang.String()")
+    }
+  }
+
+  "members with anonymous classes" should {
+    val cpg = code("""
+        |class Foo {
+        |  Foo x = new Foo() {
+        |    @Override
+        |    void foo() {}
+        |  };
+        |
+        |  void foo() {}
+        |}""".stripMargin)
+
+    "not result in subtrees to the member node" in {
+      def typeDecl = cpg.typeDecl.nameExact("Foo")
+      typeDecl.size shouldBe 1
+
+      typeDecl.member.size shouldBe 1
+      typeDecl.member.name("x").astChildren.size shouldBe 0
+    }
+
+    "contain a class declaration for the anonymous class" in {
+      inside(cpg.typeDecl.nameExact("Foo$0").l) { case List(anonDecl) =>
+        anonDecl.fullName shouldBe "Foo.x.Foo$0"
+        anonDecl.method.name.toSet shouldBe Set("<init>", "foo")
+      }
+    }
+  }
+
+  "member with generic class" should {
+    val cpg = code("""
+        |import org.apache.kafka.clients.consumer.Consumer;
+        |public class CountryPopulationConsumer {
+        |
+        | private Consumer<String, Integer> consumer;
+        |
+        |  void foo() {
+        |   consumer.poll(1000);
+        |  }
+        |}""".stripMargin)
+
+    "have a resolved typeFullName" in {
+      cpg.member
+        .name("consumer")
+        .typeFullName
+        .head shouldBe "org.apache.kafka.clients.consumer.Consumer"
+    }
+
+    "have a resolved package name in methodFullName" in {
+      cpg
+        .call("poll")
+        .methodFullName
+        .head
+        .split(":")
+        .head shouldBe "org.apache.kafka.clients.consumer.Consumer.poll"
+    }
+  }
+
+  "enum entries with anonymous classes should not result in subtrees to the member node" in {
+    val cpg = code("""
+        |enum Foo {
+        |  X(12) {
+        |    @Override
+        |    void foo() {}
+        |  };
+        |
+        |  private Foo(int x) {}
+        |
+        |  void foo() {}
+        |}""".stripMargin)
+    cpg.member.size shouldBe 1
+    cpg.member.name("x").astChildren.size shouldBe 0
+  }
+
   "non-static member initializers" should {
     "only be added once per constructor" in {
       val cpg = code("""
@@ -28,7 +132,7 @@ class NewMemberTests extends JavaSrcCode2CpgFixture {
     }
     "be added to the default constructor in classes with no constructor" in {
       val cpg = code("""
-			 |class Foo {
+             |class Foo {
              |    int x = 1;
              |}""".stripMargin)
 
@@ -358,7 +462,7 @@ class MemberTests extends JavaSrcCode2CpgFixture {
               fieldAccess.typeFullName shouldBe "int"
               fieldAccess.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
 
-              val List(identifier: Identifier, field: FieldIdentifier) = fieldAccess.argument.l
+              val List(identifier: Identifier, field: FieldIdentifier) = fieldAccess.argument.l: @unchecked
               identifier.name shouldBe "Bar"
               identifier.typeFullName shouldBe "Bar"
               identifier.order shouldBe 1

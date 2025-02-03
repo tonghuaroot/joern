@@ -7,12 +7,26 @@ class EjsPreprocessor {
   private val CommentTag        = "<%#"
   private val TagGroupsRegex    = """(<%[=\-_#]?)([\s\S]*?)([-_#]?%>)""".r
   private val ScriptGroupsRegex = """(<script>)([\s\S]*?)(</script>)""".r
-  private val Tags              = List("<%#", "<%=", "<%-", "<%_", "-%>", "_%>", "#%>", "%>")
+  private val OpeningTags       = List("<%#", "<%=", "<%-", "<%_")
+  private val ClosingTags       = List("-%>", "_%>", "#%>", "%>")
+  private val Tags              = OpeningTags ++ ClosingTags
 
   private def stripScriptTag(code: String): String = {
     var x = code.replaceAll("<script>", "<%      ").replaceAll("</script>", "%>       ")
     ScriptGroupsRegex.findAllIn(code).matchData.foreach { ma =>
       var scriptBlock = ma.group(2)
+      val matches     = TagGroupsRegex.findAllIn(scriptBlock).matchData.toList
+      matches.foreach {
+        case mat if mat.group(1) == "<%" && mat.group(3) == "-%>" =>
+          scriptBlock = scriptBlock.replace(mat.toString(), " " * mat.toString().replaceAll("[^\\s]", " ").length)
+        case _ =>
+      }
+      OpeningTags.foreach { tag =>
+        scriptBlock = scriptBlock.replaceAll(s"'$tag", s"\"${" " * (tag.length - 1)}")
+      }
+      ClosingTags.foreach { tag =>
+        scriptBlock = scriptBlock.replaceAll(s"$tag'", s"${" " * (tag.length - 1)}\"")
+      }
       Tags.foreach { tag =>
         scriptBlock = scriptBlock.replaceAll(tag, " " * tag.length)
       }

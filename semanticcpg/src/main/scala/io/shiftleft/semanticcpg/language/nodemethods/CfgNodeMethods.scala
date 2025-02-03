@@ -1,110 +1,87 @@
 package io.shiftleft.semanticcpg.language.nodemethods
 
-import io.shiftleft.Implicits.JavaIteratorDeco
-import io.shiftleft.codepropertygraph.generated.nodes._
+import io.shiftleft.Implicits.IterableOnceDeco
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.semanticcpg.NodeExtension
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal.Traversal
+import io.shiftleft.semanticcpg.language.*
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension {
 
   /** Successors in the CFG
     */
-  def cfgNext: Traversal[CfgNode] = {
-    Traversal.fromSingle(node).cfgNext
-  }
+  def cfgNext: Iterator[CfgNode] =
+    Iterator.single(node).cfgNext
 
   /** Maps each node in the traversal to a traversal returning its n successors.
     */
-  def cfgNext(n: Int): Traversal[CfgNode] = n match {
-    case 0 => Traversal()
+  def cfgNext(n: Int): Iterator[CfgNode] = n match {
+    case 0 => Iterator.empty
     case _ => cfgNext.flatMap(x => List(x) ++ x.cfgNext(n - 1))
   }
 
   /** Maps each node in the traversal to a traversal returning its n predecessors.
     */
-  def cfgPrev(n: Int): Traversal[CfgNode] = n match {
-    case 0 => Traversal()
+  def cfgPrev(n: Int): Iterator[CfgNode] = n match {
+    case 0 => Iterator.empty
     case _ => cfgPrev.flatMap(x => List(x) ++ x.cfgPrev(n - 1))
   }
 
   /** Predecessors in the CFG
     */
-  def cfgPrev: Traversal[CfgNode] = {
-    Traversal.fromSingle(node).cfgPrev
-  }
+  def cfgPrev: Iterator[CfgNode] =
+    Iterator.single(node).cfgPrev
 
   /** Recursively determine all nodes on which this CFG node is control-dependent.
     */
-  def controlledBy: Traversal[CfgNode] = {
+  def controlledBy: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._cdgIn.asScala
+      v._cdgIn
     }
   }
 
   /** Recursively determine all nodes which this CFG node controls
     */
-  def controls: Traversal[CfgNode] = {
+  def controls: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._cdgOut.asScala
+      v._cdgOut
     }
   }
 
   /** Recursively determine all nodes by which this node is dominated
     */
-  def dominatedBy: Traversal[CfgNode] = {
+  def dominatedBy: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._dominateIn.asScala
+      v._dominateIn
     }
   }
 
   /** Recursively determine all nodes which are dominated by this node
     */
-  def dominates: Traversal[CfgNode] = {
+  def dominates: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._dominateOut.asScala
+      v._dominateOut
     }
   }
 
   /** Recursively determine all nodes by which this node is post dominated
     */
-  def postDominatedBy: Traversal[CfgNode] = {
+  def postDominatedBy: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._postDominateIn.asScala
+      v._postDominateIn
     }
   }
 
   /** Recursively determine all nodes which are post dominated by this node
     */
-  def postDominates: Traversal[CfgNode] = {
+  def postDominates: Iterator[CfgNode] = {
     expandExhaustively { v =>
-      v._postDominateOut.asScala
+      v._postDominateOut
     }
   }
 
-  /** Using the post dominator tree, will determine if this node passes through the included set of nodes and filter it
-    * in.
-    * @param included
-    *   the nodes this node must pass through.
-    * @return
-    *   the traversal of this node if it passes through the included set.
-    */
-  def passes(included: Set[CfgNode]): Traversal[CfgNode] =
-    Traversal.fromSingle(node).filter(_.postDominatedBy.exists(included.contains))
-
-  /** Using the post dominator tree, will determine if this node passes through the excluded set of nodes and filter it
-    * out.
-    * @param excluded
-    *   the nodes this node must not pass through.
-    * @return
-    *   the traversal of this node if it does not pass through the excluded set.
-    */
-  def passesNot(excluded: Set[CfgNode]): Traversal[CfgNode] =
-    Traversal.fromSingle(node).filterNot(_.postDominatedBy.exists(excluded.contains))
-
-  private def expandExhaustively(expand: CfgNode => Iterator[StoredNode]): Traversal[CfgNode] = {
+  private def expandExhaustively(expand: CfgNode => Iterator[StoredNode]): Iterator[CfgNode] = {
     var controllingNodes = List.empty[CfgNode]
     var visited          = Set.empty + node
     var worklist         = node :: Nil
@@ -121,7 +98,7 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension {
         }
       }
     }
-    Traversal.from(controllingNodes)
+    controllingNodes.iterator
   }
 
   def method: Method = node match {
@@ -129,6 +106,7 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension {
     case _: MethodParameterIn | _: MethodParameterOut | _: MethodReturn =>
       walkUpAst(node)
     case _: CallRepr if !node.isInstanceOf[Call] => walkUpAst(node)
+    case _: Annotation | _: AnnotationLiteral    => node.inAst.collectAll[Method].head
     case _: Expression | _: JumpTarget           => walkUpContains(node)
   }
 
@@ -147,9 +125,18 @@ class CfgNodeMethods(val node: CfgNode) extends AnyVal with NodeExtension {
   private def walkUpContains(node: StoredNode): Method =
     node._containsIn.onlyChecked match {
       case method: Method => method
-      case _: TypeDecl    =>
-        // TODO - there are csharp CPGs that have typedecls here, which is invalid.
-        null
+      case typeDecl: TypeDecl =>
+        typeDecl.astParent match {
+          case namespaceBlock: NamespaceBlock =>
+            // For Typescript, types may be declared in namespaces which we represent as NamespaceBlocks
+            namespaceBlock.inAst.collectAll[Method].headOption.orNull
+          case method: Method =>
+            // For a language such as Javascript, types may be dynamically declared under procedures
+            method
+          case _ =>
+            // there are csharp CPGs that have typedecls here, which is invalid.
+            null
+        }
     }
 
 }

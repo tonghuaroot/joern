@@ -1,11 +1,11 @@
 package io.joern.console
 
-import better.files.Dsl._
-import better.files._
-import io.joern.console.testing._
+import better.files.Dsl.*
+import better.files.*
+import io.joern.console.testing.*
 import io.joern.x2cpg.X2Cpg.defaultOverlayCreators
 import io.joern.x2cpg.layers.{Base, CallGraph, ControlFlow, TypeRelations}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.{LayerCreator, LayerCreatorContext}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -27,22 +27,25 @@ class ConsoleTests extends AnyWordSpec with Matchers {
   "importCode" should {
     "warn about non-existent dir" in ConsoleFixture() { (console, _) =>
       val nonExistentDir = "/does/not/exist/"
-      the[ConsoleException] thrownBy console.importCode(
-        nonExistentDir
-      ) should have message s"Input path does not exist: '$nonExistentDir'"
-      the[ConsoleException] thrownBy console.importCode.c(
-        nonExistentDir
-      ) should have message s"Input path does not exist: '$nonExistentDir'"
-      the[ConsoleException] thrownBy console.importCode.jssrc(
-        nonExistentDir
-      ) should have message s"Input path does not exist: '$nonExistentDir'"
-      the[ConsoleException] thrownBy console.importCode.java(
-        nonExistentDir
-      ) should have message s"Input path does not exist: '$nonExistentDir'"
+      intercept[ConsoleException] {
+        console.importCode(nonExistentDir)
+      }.getMessage shouldBe s"Input path does not exist: '$nonExistentDir'"
+      intercept[ConsoleException] {
+        console.importCode.c(nonExistentDir)
+      }.getMessage shouldBe s"Input path does not exist: '$nonExistentDir'"
+      intercept[ConsoleException] {
+        console.importCode.jssrc(nonExistentDir)
+      }.getMessage shouldBe s"Input path does not exist: '$nonExistentDir'"
+      intercept[ConsoleException] {
+        console.importCode.swiftsrc(nonExistentDir)
+      }.getMessage shouldBe s"Input path does not exist: '$nonExistentDir'"
+      intercept[ConsoleException] {
+        console.importCode.java(nonExistentDir)
+      }.getMessage shouldBe s"Input path does not exist: '$nonExistentDir'"
     }
 
     "provide overview of available language modules" in ConsoleFixture() { (console, _) =>
-      console.importCode.toString.contains("| C") shouldBe true
+      console.importCode.toString should include("testCFrontend")
     }
 
     "allow importing code with specific module (c2cpg)" in ConsoleFixture() { (console, codeDir) =>
@@ -76,7 +79,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
           |int foo() {};
           |#endif
           |""".stripMargin
-        File.usingTemporaryFile("console", suffix = ".c", parent = Some(codeDir)) { file =>
+        File.usingTemporaryFile("console", suffix = ".c", parent = Option(codeDir)) { file =>
           file.write(code)
           console.importCode.c(inputPath = codeDir.toString)
           // importing without args should not yield foo
@@ -103,6 +106,43 @@ class ConsoleTests extends AnyWordSpec with Matchers {
         // importing with args should yield foo
         console.importCode.c.fromString(code, List("--define", "D"))
         Set("foo").subsetOf(console.cpg.method.name.toSet) shouldBe true
+    }
+
+    "allow importing code from file with JS frontend via apply" in ConsoleFixture() { (console, _) =>
+      val code = "function foo() {};"
+      File.usingTemporaryFile("consoleTests", ".js") { tmpFile =>
+        tmpFile.write(code)
+        console.importCode(tmpFile.pathAsString)
+        Set("foo").subsetOf(console.cpg.method.name.toSet) shouldBe true
+      }
+    }
+
+    "allow importing code from file with JS frontend" taggedAs NotInWindowsRunners in ConsoleFixture() { (console, _) =>
+      val code = "function foo() {};"
+      File.usingTemporaryFile("consoleTests", ".js") { tmpFile =>
+        tmpFile.write(code)
+        console.importCode.jssrc(tmpFile.pathAsString)
+        Set("foo").subsetOf(console.cpg.method.name.toSet) shouldBe true
+      }
+    }
+
+    "allow importing code from file with Swift frontend via apply" in ConsoleFixture() { (console, _) =>
+      val code = "func foo() {};"
+      File.usingTemporaryFile("consoleTests", ".swift") { tmpFile =>
+        tmpFile.write(code)
+        console.importCode(tmpFile.pathAsString)
+        Set("foo").subsetOf(console.cpg.method.name.toSet) shouldBe true
+      }
+    }
+
+    "allow importing code from file with Swift frontend" taggedAs NotInWindowsRunners in ConsoleFixture() {
+      (console, _) =>
+        val code = "func foo() {};"
+        File.usingTemporaryFile("consoleTests", ".swift") { tmpFile =>
+          tmpFile.write(code)
+          console.importCode.swiftsrc(tmpFile.pathAsString)
+          Set("foo").subsetOf(console.cpg.method.name.toSet) shouldBe true
+        }
     }
 
     "allow importing code and setting project name" in ConsoleFixture() { (console, codeDir) =>
@@ -162,7 +202,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
         val projectName = "myproject"
         val cpg         = console.importCpg(file.toString, projectName)
         console.workspace.numberOfProjects shouldBe 1
-        console.workspace.projectByCpg(cpg.get).map(_.name) shouldBe Some(projectName)
+        console.workspace.projectByCpg(cpg.get).map(_.name) shouldBe Option(projectName)
         console.project.appliedOverlays shouldBe List()
       }
     }
@@ -223,9 +263,9 @@ class ConsoleTests extends AnyWordSpec with Matchers {
                 console.importCpg(cpg3Path.toString)
                 console.workspace.numberOfProjects shouldBe 3
                 console.workspace.project(cpg1Path.toFile.getName) should not be empty
-                console.workspace.project(cpg1Path.toFile.getName + "1") should not be empty
-                console.workspace.project(cpg1Path.toFile.getName + "2") should not be empty
-                console.workspace.project(cpg1Path.toFile.getName + "12") shouldBe empty
+                console.workspace.project(s"${cpg1Path.toFile.getName}1") should not be empty
+                console.workspace.project(s"${cpg1Path.toFile.getName}2") should not be empty
+                console.workspace.project(s"${cpg1Path.toFile.getName}12") shouldBe empty
               }
             }
           }
@@ -258,7 +298,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
       project match {
         case Some(p) =>
           p.name shouldBe projectName
-          console.workspace.projectByCpg(p.cpg.get).map(_.name) shouldBe Some(projectName)
+          console.workspace.projectByCpg(p.cpg.get).map(_.name) shouldBe Option(projectName)
         case None => fail()
       }
     }
@@ -318,7 +358,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
       )
       val numOverlayFilesBefore = console.project.path.resolve("overlays").toFile.list().length
       numOverlayFilesBefore shouldBe 4
-      console._runAnalyzer(defaultOverlayCreators(): _*)
+      console._runAnalyzer(defaultOverlayCreators()*)
       console.project.appliedOverlays shouldBe List(
         Base.overlayName,
         ControlFlow.overlayName,
@@ -360,7 +400,7 @@ class ConsoleTests extends AnyWordSpec with Matchers {
     override val overlayName: String = "fooname"
     override val description: String = "foodescr"
 
-    override def create(context: LayerCreatorContext, storeUndoInfo: Boolean): Unit = {}
+    override def create(context: LayerCreatorContext): Unit = {}
   }
 
   "save" should {
@@ -388,7 +428,8 @@ class ConsoleTests extends AnyWordSpec with Matchers {
   "cpg" should {
     "provide .help command" in ConsoleFixture() { (console, codeDir) =>
       // part of Predefined.shared, which makes the below work in the repl without separate import
-      import io.shiftleft.codepropertygraph.Cpg.docSearchPackages
+      import io.shiftleft.semanticcpg.language.docSearchPackages
+      import io.joern.console.testing.availableWidthProvider
 
       console.importCode(codeDir.toString)
       val nodeStartersHelp = console.cpg.help

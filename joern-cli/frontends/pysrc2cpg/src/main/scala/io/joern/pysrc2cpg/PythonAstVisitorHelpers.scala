@@ -1,14 +1,20 @@
 package io.joern.pysrc2cpg
 
-import io.joern.pysrc2cpg.memop.{Load, MemoryOperation, Store}
+import io.joern.pysrc2cpg.memop.Load
+import io.joern.pysrc2cpg.memop.MemoryOperation
+import io.joern.pysrc2cpg.memop.Store
 import io.joern.pythonparser.ast
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
+import io.joern.x2cpg.ValidationMode
+import io.shiftleft.codepropertygraph.generated.ControlStructureTypes
+import io.shiftleft.codepropertygraph.generated.DispatchTypes
+import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.nodes.*
 
-import scala.collection.immutable.{::, Nil}
+import scala.collection.immutable.::
+import scala.collection.immutable.Nil
 import scala.collection.mutable
 
-trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
+trait PythonAstVisitorHelpers(implicit withSchemaValidation: ValidationMode) { this: PythonAstVisitor =>
 
   protected def codeOf(node: NewNode): String = {
     node.asInstanceOf[AstNodeNew].code
@@ -17,7 +23,14 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
   protected def lineAndColOf(node: ast.iattributes): LineAndColumn = {
     // node.end_col_offset - 1 because the end column offset of the parser points
     // behind the last symbol.
-    LineAndColumn(node.lineno, node.col_offset, node.end_lineno, node.end_col_offset - 1)
+    LineAndColumn(
+      node.lineno,
+      node.col_offset,
+      node.end_lineno,
+      node.end_col_offset - 1,
+      node.input_offset,
+      node.end_input_offset
+    )
   }
 
   private var tmpCounter = 0
@@ -25,9 +38,9 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
   protected def getUnusedName(prefix: String = null): String = {
     // TODO check that result name does not collide with existing variables.
     val result = if (prefix != null) {
-      prefix + "_tmp" + tmpCounter
+      s"${prefix}_tmp$tmpCounter"
     } else {
-      "tmp" + tmpCounter
+      s"tmp$tmpCounter"
     }
     tmpCounter += 1
     result
@@ -40,16 +53,46 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
     orElseBlock: Iterable[NewNode],
     lineAndColumn: LineAndColumn
   ): NewNode = {
-    val controlStructureNode =
-      nodeBuilder.controlStructureNode("try: ...", ControlStructureTypes.TRY, lineAndColumn)
+    val controlStructureNode = nodeBuilder.controlStructureNode("try: ...", ControlStructureTypes.TRY, lineAndColumn)
 
-    val bodyBlockNode     = createBlock(body, lineAndColumn)
-    val handlersBlockNode = createBlock(handlers, lineAndColumn)
-    val finalBlockNode    = createBlock(finalBlock, lineAndColumn)
-    val orElseBlockNode   = createBlock(orElseBlock, lineAndColumn)
+    val bodyBlockNode      = createBlock(body, lineAndColumn).asInstanceOf[NewBlock]
+    val handlersBlockNodes = handlers.map(x => createBlock(Iterable(x), lineAndColumn).asInstanceOf[NewBlock]).toSeq
 
-    addAstChildNodes(controlStructureNode, 1, bodyBlockNode, handlersBlockNode, finalBlockNode, orElseBlockNode)
+    val orElseBlockSeq = orElseBlock.toSeq
+    val finalBlockSeq  = finalBlock.toSeq
 
+    val elseBlockNodes = if (orElseBlockSeq.nonEmpty) {
+      val orElseBlockNode = createBlock(orElseBlockSeq, lineAndColumn).asInstanceOf[NewBlock]
+      Seq(orElseBlockNode)
+    } else { Seq.empty }
+
+    val finallyBlockNodes = if (finalBlockSeq.nonEmpty) {
+      val finalBlockNode = createBlock(finalBlockSeq, lineAndColumn).asInstanceOf[NewBlock]
+      Seq(finalBlockNode)
+    } else { Seq.empty }
+
+    val handlersAsts = handlersBlockNodes.map { handlerNode =>
+      val controlStructureNode =
+        nodeBuilder.controlStructureNode(codeOf(handlerNode), ControlStructureTypes.CATCH, lineAndColumn)
+      addAstChildNodes(controlStructureNode, 1, Seq(handlerNode))
+      controlStructureNode
+    }
+
+    val finallyAsts = finallyBlockNodes.map { finallyNode =>
+      val controlStructureNode =
+        nodeBuilder.controlStructureNode(codeOf(finallyNode), ControlStructureTypes.FINALLY, lineAndColumn)
+      addAstChildNodes(controlStructureNode, 1, Seq(finallyNode))
+      controlStructureNode
+    }
+
+    val elseAsts = elseBlockNodes.map { elseNode =>
+      val controlStructureNode =
+        nodeBuilder.controlStructureNode(codeOf(elseNode), ControlStructureTypes.ELSE, lineAndColumn)
+      addAstChildNodes(controlStructureNode, 1, Seq(elseNode))
+      controlStructureNode
+    }
+
+    addAstChildNodes(controlStructureNode, 1, Seq(bodyBlockNode) ++ handlersAsts ++ elseAsts ++ finallyAsts)
     controlStructureNode
   }
 
@@ -61,8 +104,11 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
     val importAssignNodes =
       names.map { alias =>
         val importedAsIdentifierName = alias.asName.getOrElse(alias.name)
+
+        val nameParts = importedAsIdentifierName.split('.')
+
         val importAssignLhsIdentifierNode =
-          createIdentifierNode(importedAsIdentifierName, Store, lineAndCol)
+          createIdentifierNode(nameParts(0), Store, lineAndCol)
 
         val arguments = Seq(
           nodeBuilder.stringLiteralNode(from, lineAndCol),
@@ -129,8 +175,8 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
 
       targets.foreach { target =>
         val targetWithAccessChains = getTargetsWithAccessChains(target)
-        targetWithAccessChains.foreach { case (target, accessChain) =>
-          val targetNode = convert(target)
+        targetWithAccessChains.foreach { case (trgt, accessChain) =>
+          val targetNode = convert(trgt)
           val tmpIdentifierNode =
             createIdentifierNode(tmpVariableName, Load, lineAndColumn)
           val indexTmpIdentifierNode = createIndexAccessChain(tmpIdentifierNode, accessChain, lineAndColumn)
@@ -437,6 +483,9 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
     val callNode = nodeBuilder.callNode(code, Operators.assignment, DispatchTypes.STATIC_DISPATCH, lineAndColumn)
 
     addAstChildrenAsArguments(callNode, 1, lhsNode, rhsNode)
+    // Do not include imports or function pointers
+    if (!codeOf(rhsNode).startsWith("import(") && codeOf(rhsNode) != s"def ${codeOf(lhsNode)}(...)")
+      contextStack.considerAsGlobalVariable(lhsNode)
 
     callNode
   }
@@ -496,7 +545,7 @@ trait PythonAstVisitorHelpers { this: PythonAstVisitor =>
     accessChain match {
       case accessIndex :: tail =>
         val baseNode  = createIndexAccessChain(rootNode, tail, lineAndColumn)
-        val indexNode = nodeBuilder.numberLiteralNode(accessIndex, lineAndColumn)
+        val indexNode = nodeBuilder.intLiteralNode(accessIndex.toString, lineAndColumn)
 
         createIndexAccess(baseNode, indexNode, lineAndColumn)
       case Nil =>

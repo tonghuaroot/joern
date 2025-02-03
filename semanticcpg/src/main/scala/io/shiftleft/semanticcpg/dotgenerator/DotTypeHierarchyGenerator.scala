@@ -1,13 +1,12 @@
 package io.shiftleft.semanticcpg.dotgenerator
 
-import io.shiftleft.codepropertygraph.Cpg
-import overflowdb.traversal._
+import io.shiftleft.codepropertygraph.generated.Cpg
 
 object DotTypeHierarchyGenerator {
 
-  def dotTypeHierarchy(cpg: Cpg): Traversal[String] = {
+  def dotTypeHierarchy(cpg: Cpg): Iterator[String] = {
     val typeHierarchy = new TypeHierarchyGenerator().generate(cpg)
-    Traversal(DotSerializer.dotGraph(None, typeHierarchy))
+    Iterator(DotSerializer.dotGraph(None, typeHierarchy))
   }
 
 }

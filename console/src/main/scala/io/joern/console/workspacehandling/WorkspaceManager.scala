@@ -1,16 +1,17 @@
 package io.joern.console.workspacehandling
 
-import better.files.Dsl._
-import better.files._
+import better.files.Dsl.*
+import better.files.*
+import io.joern.console
+import io.joern.console.defaultAvailableWidthProvider
 import io.joern.console.Reporting
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.cpgloading.{CpgLoader, CpgLoaderConfig}
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
 import org.json4s.DefaultFormats
-import org.json4s.native.Serialization.{write => jsonWrite}
-import overflowdb.Config
+import org.json4s.native.Serialization.write as jsonWrite
 
 import java.net.URLEncoder
-import java.nio.file.Path
+import java.nio.file.{Path, Paths}
 import scala.collection.mutable.ListBuffer
 import scala.util.{Failure, Success, Try}
 
@@ -98,7 +99,7 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
 
   /** Delete the workspace from disk, then initialize it again.
     */
-  def reset(): Unit = {
+  def reset: Unit = {
     Try(cpg.close())
     deleteWorkspace()
     workspace = loader.load(path)
@@ -106,11 +107,11 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
 
   private def deleteWorkspace(): Unit = {
     if (dirPath == null || dirPath.toString == "") {
-      throw new RuntimeException("dirPath is not set")
+      throw console.Error("dirPath is not set")
     }
     val dirFile = better.files.File(dirPath.toAbsolutePath.toString)
     if (!dirFile.exists) {
-      throw new RuntimeException(s"Directory ${dirFile.toString} does not exist")
+      throw console.Error(s"Directory ${dirFile.toString} does not exist")
     }
 
     dirFile.delete()
@@ -168,7 +169,7 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
   private def projectDir(inputPath: String): Path = {
     val filename = File(inputPath).path.getFileName
     if (filename == null) {
-      throw new RuntimeException("invalid input path: " + inputPath)
+      throw RuntimeException("invalid input path: " + inputPath)
     }
     dirPath
       .resolve(URLEncoder.encode(filename.toString, DefaultCharset.toString))
@@ -208,14 +209,12 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
   /** Obtain the cpg that was last loaded. Throws a runtime exception if no CPG has been loaded.
     */
   def cpg: Cpg = {
-    val project = workspace.projects.lastOption
-    project match {
-      case Some(p) =>
-        p.cpg match {
-          case Some(value) => value
-          case None        => throw new RuntimeException(s"No CPG loaded for project ${p.name}")
-        }
-      case None => throw new RuntimeException("No projects loaded")
+    workspace.projects.lastOption match {
+      case Some(project) =>
+        project.cpg.getOrElse(
+          throw console.Error(s"No CPG loaded for project ${project.name} - try e.g. `help|importCode|importCpg|open`")
+        )
+      case None => throw console.Error("No projects loaded")
     }
   }
 
@@ -305,17 +304,12 @@ class WorkspaceManager[ProjectType <: Project](path: String, loader: WorkspaceLo
 
   private def loadCpgRaw(cpgFilename: String): Option[Cpg] = {
     Try {
-      val odbConfig = Config.withDefaults.withStorageLocation(cpgFilename)
-      val config =
-        CpgLoaderConfig.withDefaults.doNotCreateIndexesOnLoad.withOverflowConfig(odbConfig)
-      val newCpg = CpgLoader.loadFromOverflowDb(config)
-      CpgLoader.createIndexes(newCpg)
-      newCpg
+      CpgLoader.load(cpgFilename)
     } match {
       case Success(v) => Some(v)
       case Failure(ex) =>
         System.err.println("Error loading CPG")
-        System.err.println(ex)
+        ex.printStackTrace()
         None
     }
   }

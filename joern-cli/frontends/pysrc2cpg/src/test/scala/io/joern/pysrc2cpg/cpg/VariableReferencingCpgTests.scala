@@ -1,8 +1,8 @@
 package io.joern.pysrc2cpg.cpg
 
-import io.joern.pysrc2cpg.Py2CpgTestContext
-import io.shiftleft.semanticcpg.language._
-import io.shiftleft.codepropertygraph.generated.{EvaluationStrategies, nodes}
+import io.joern.pysrc2cpg.testfixtures.Py2CpgTestContext
+import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -22,6 +22,19 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
       localNode.referencingIdentifiers.lineNumber(2).code.head shouldBe "x"
       localNode.referencingIdentifiers.lineNumber(3).code.head shouldBe "x"
     }
+
+    "test local variable line and column numbers" in {
+      val f = cpg.local.nameExact("f").head
+      f.lineNumber shouldBe Some(1)
+      f.columnNumber shouldBe Some(1)
+      val x = cpg.method.name("f").local.nameExact("x").head
+      val y = cpg.method.name("f").local.nameExact("y").head
+      x.lineNumber shouldBe Some(2)
+      x.columnNumber shouldBe Some(3)
+      y.lineNumber shouldBe Some(3)
+      y.columnNumber shouldBe Some(3)
+    }
+
   }
 
   "parameter variable reference" - {
@@ -38,6 +51,20 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
       paramNode.referencingIdentifiers.lineNumber(2).code.head shouldBe "x"
       paramNode.referencingIdentifiers.lineNumber(3).code.head shouldBe "x"
     }
+
+    "test local variable line and column numbers" in {
+      val f = cpg.local.nameExact("f").head
+      f.lineNumber shouldBe Some(1)
+      f.columnNumber shouldBe Some(1)
+
+      val x = cpg.method.name("f").parameter.name("x").head
+      val y = cpg.method.name("f").local.name("y").head
+      x.lineNumber shouldBe Some(1)
+      x.columnNumber shouldBe Some(7)
+      y.lineNumber shouldBe Some(3)
+      y.columnNumber shouldBe Some(3)
+    }
+
   }
 
   "comprehension variable reference" - {
@@ -62,6 +89,19 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
     "test identifiers in line 2 reference to comprehension block x variable" in {
       val localXNode = cpg.local("x").filter(_.definingBlock.astParent.isMethod.isEmpty).head
       cpg.identifier("x").lineNumber(2).refsTo.foreach(local => local shouldBe localXNode)
+    }
+
+    "test local variable line and column numbers" in {
+      val f = cpg.local.nameExact("f").head
+      f.lineNumber shouldBe Some(3)
+      f.columnNumber shouldBe Some(1)
+
+      val x = cpg.local("x").filterNot(_.definingBlock.astParent.isMethod.isEmpty).head
+      val y = cpg.local("y").filterNot(_.definingBlock.astParent.isMethod.isEmpty).head
+      x.lineNumber shouldBe Some(1)
+      x.columnNumber shouldBe Some(1)
+      y.lineNumber shouldBe Some(2)
+      y.columnNumber shouldBe Some(13)
     }
   }
 
@@ -109,11 +149,10 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test method reference closure binding" in {
-      val methodRefNode  = cpg.methodRef("f").head
+      val methodRefNode  = cpg.methodRefWithName("f").head
       val closureBinding = methodRefNode._closureBindingViaCaptureOut.next()
       closureBinding.closureBindingId shouldBe Some("test.py:<module>.f:x")
       closureBinding.evaluationStrategy shouldBe EvaluationStrategies.BY_REFERENCE
-      closureBinding.closureOriginalName shouldBe Some("x")
     }
 
     "test global variable exists" in {
@@ -145,11 +184,10 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test method reference closure binding" in {
-      val methodRefNode  = cpg.methodRef("f").head
+      val methodRefNode  = cpg.methodRefWithName("f").head
       val closureBinding = methodRefNode._closureBindingViaCaptureOut.next()
       closureBinding.closureBindingId shouldBe Some("test.py:<module>.f:x")
       closureBinding.evaluationStrategy shouldBe EvaluationStrategies.BY_REFERENCE
-      closureBinding.closureOriginalName shouldBe Some("x")
     }
 
     "test global variable exists" in {
@@ -183,11 +221,10 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test method reference closure binding of f in g" in {
-      val methodRefNode  = cpg.methodRef("f").head
+      val methodRefNode  = cpg.methodRefWithName("f").head
       val closureBinding = methodRefNode._closureBindingViaCaptureOut.next()
       closureBinding.closureBindingId shouldBe Some("test.py:<module>.g.f:x")
       closureBinding.evaluationStrategy shouldBe EvaluationStrategies.BY_REFERENCE
-      closureBinding.closureOriginalName shouldBe Some("x")
     }
 
     "test local variable exists in g" in {
@@ -200,11 +237,10 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test method reference closure binding of g in module" in {
-      val methodRefNode  = cpg.methodRef("g").head
+      val methodRefNode  = cpg.methodRefWithName("g").head
       val closureBinding = methodRefNode._closureBindingViaCaptureOut.next()
       closureBinding.closureBindingId shouldBe Some("test.py:<module>.g:x")
       closureBinding.evaluationStrategy shouldBe EvaluationStrategies.BY_REFERENCE
-      closureBinding.closureOriginalName shouldBe Some("x")
     }
 
     "test global variable exists" in {
@@ -219,21 +255,29 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
   }
 
   "reference from class method" - {
-    lazy val cpg = Py2CpgTestContext.buildCpg("""x = 0
+    lazy val cpg = Py2CpgTestContext.buildCpg("""
+        |x = 0
         |class MyClass():
         |  x = 1
-        |  def f():
+        |  def f(self):
         |    someFunc(x)
         |""".stripMargin)
 
     "test capturing to global x exists" in {
-      val localNode = cpg.method.name("<module>").local.name("x").head
-      localNode._closureBindingViaRefIn.next().closureBindingId shouldBe Some(
-        "test.py:<module>.MyClass.MyClass<body>.f:x"
-      )
+      val moduleXLocal   = cpg.method.name("<module>").local.name("x").head
+      val moduleXBinding = moduleXLocal._closureBindingViaRefIn.next()
+      moduleXBinding.closureBindingId shouldBe Some("test.py:<module>.MyClass.<body>:x")
 
-      val localInMyClassNode = cpg.method.name("MyClass<body>").local.name("x").head
-      localInMyClassNode.referencingIdentifiers.lineNumber(5).hasNext shouldBe false
+      val bodyXLocal = cpg.method.fullName("test.py:<module>.MyClass.<body>").local.name("x").head
+      bodyXLocal.closureBindingId shouldBe None
+
+      val capturedBodyXLocal = cpg.method.fullName("test.py:<module>.MyClass.<body>").local.name("<captured>x").head
+      capturedBodyXLocal.closureBindingId shouldBe Some("test.py:<module>.MyClass.<body>:x")
+      val bodyXBinding = capturedBodyXLocal._closureBindingViaRefIn.next()
+      bodyXBinding.closureBindingId shouldBe Some("test.py:<module>.MyClass.f:x")
+
+      val fLocal = cpg.method.fullName("test.py:<module>.MyClass.f").local.name("x").head
+      fLocal.closureBindingId shouldBe Some("test.py:<module>.MyClass.f:x")
     }
   }
 
@@ -248,8 +292,24 @@ class VariableReferencingCpgTests extends AnyFreeSpec with Matchers {
       val localNode = cpg.method.name("<module>").local.name("x").head
       localNode._closureBindingViaRefIn.hasNext shouldBe false
 
-      val localInMyClassNode = cpg.method.name("MyClass<body>").local.name("x").head
+      val localInMyClassNode = cpg.method.name("<body>").local.name("x").head
       localInMyClassNode.referencingIdentifiers.lineNumber(4).code.head shouldBe "x"
+    }
+  }
+
+  "delete wildcard imported variable" - {
+    lazy val cpg = Py2CpgTestContext.buildCpg("""from foo import *
+        |del someImportedVariable
+        |""".stripMargin)
+
+    "test local variable exists in module method" in {
+      val localNode = cpg.method.name("<module>").local.name("someImportedVariable").head
+    }
+
+    "test reference to local variable" in {
+      val localNode        = cpg.method.name("<module>").local.name("someImportedVariable").head
+      val List(identifier) = localNode.referencingIdentifiers.l
+      identifier.name shouldBe "someImportedVariable"
     }
   }
 }

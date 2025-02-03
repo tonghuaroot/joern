@@ -1,19 +1,17 @@
 package io.shiftleft.semanticcpg.language
 
-import io.shiftleft.codepropertygraph.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes._
+import io.shiftleft.codepropertygraph.generated.Cpg
+import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, NodeTypes}
 import io.shiftleft.semanticcpg.codedumper.CodeDumper
-import overflowdb.Node
-import overflowdb.traversal._
-import overflowdb.traversal.help.Doc
+import io.shiftleft.codepropertygraph.generated.help.{Doc, Traversal}
 
 /** Steps for all node types
   *
   * This is the base class for all steps defined on
   */
-@help.Traversal(elementType = classOf[StoredNode])
-class NodeSteps[NodeType <: StoredNode](val traversal: Traversal[NodeType]) extends AnyVal {
+@Traversal(elementType = classOf[StoredNode])
+class NodeSteps[NodeType <: StoredNode](val traversal: Iterator[NodeType]) extends AnyVal {
 
   @Doc(
     info = "The source file this code is in",
@@ -23,15 +21,16 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Traversal[NodeType]) exte
       |the file node that represents that source file.
       |"""
   )
-  def file: Traversal[File] =
-    traversal
-      .choose(_.label) {
-        case NodeTypes.NAMESPACE => _.in(EdgeTypes.REF).out(EdgeTypes.SOURCE_FILE)
-        case NodeTypes.COMMENT   => _.in(EdgeTypes.AST).hasLabel(NodeTypes.FILE)
-        case _ =>
-          _.repeat(_.coalesce(_.out(EdgeTypes.SOURCE_FILE), _.in(EdgeTypes.AST)))(_.until(_.hasLabel(NodeTypes.FILE)))
-      }
-      .cast[File]
+  def file: Iterator[File] = {
+    traversal.flatMap {
+      case namespace: Namespace =>
+        namespace.refIn.sourceFileOut
+      case comment: Comment =>
+        comment.astIn
+      case node =>
+        Iterator(node).repeat(_.coalesce(_._sourceFileOut, _._astIn))(_.until(_.hasLabel(File.Label))).cast[File]
+    }
+  }
 
   @Doc(
     info = "Location, including filename and line number",
@@ -45,7 +44,7 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Traversal[NodeType]) exte
       |on the user's side.
       |"""
   )
-  def location(implicit finder: NodeExtensionFinder): Traversal[NewLocation] =
+  def location(implicit finder: NodeExtensionFinder): Iterator[NewLocation] =
     traversal.map(_.location)
 
   @Doc(
@@ -84,11 +83,6 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Traversal[NodeType]) exte
     }.l
   }
 
-  /* follow the incoming edges of the given type as long as possible */
-  protected def walkIn(edgeType: String): Traversal[Node] =
-    traversal
-      .repeat(_.in(edgeType))(_.until(_.in(edgeType).count.filter(_ == 0)))
-
   @Doc(
     info = "Tag node with `tagName`",
     longInfo = """
@@ -119,7 +113,7 @@ class NodeSteps[NodeType <: StoredNode](val traversal: Traversal[NodeType]) exte
     }.l
 
   @Doc(info = "Tags attached to this node")
-  def tag: Traversal[Tag] = {
+  def tag: Iterator[Tag] = {
     traversal.flatMap { node =>
       node.tag
     }

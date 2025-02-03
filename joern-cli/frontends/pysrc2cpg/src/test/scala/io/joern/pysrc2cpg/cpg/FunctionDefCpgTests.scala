@@ -1,8 +1,10 @@
 package io.joern.pysrc2cpg.cpg
 
-import io.joern.pysrc2cpg.Constants
-import io.joern.pysrc2cpg.Py2CpgTestContext
-import io.shiftleft.semanticcpg.language._
+import io.joern.pysrc2cpg.testfixtures.Py2CpgTestContext
+import io.joern.x2cpg.frontendspecific.pysrc2cpg.Constants
+import io.shiftleft.codepropertygraph.generated.ModifierTypes
+import io.shiftleft.codepropertygraph.generated.nodes.Call
+import io.shiftleft.semanticcpg.language.*
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -16,7 +18,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
       val methodNode = cpg.method.fullName("test.py:<module>.func").head
       methodNode.name shouldBe "func"
       methodNode.fullName shouldBe "test.py:<module>.func"
-      methodNode.filename shouldBe "<absoluteTestPath>/test.py"
+      methodNode.filename shouldBe "test.py"
       methodNode.isExternal shouldBe false
       methodNode.lineNumber shouldBe Some(1)
       methodNode.columnNumber shouldBe Some(1)
@@ -53,12 +55,12 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
     }
 
     "test function method ref" in {
-      cpg.methodRef("func").referencedMethod.fullName.head shouldBe
+      cpg.methodRefWithName("func").referencedMethod.fullName.head shouldBe
         "test.py:<module>.func"
     }
 
     "test assignment of method ref to local variable" in {
-      val assignNode = cpg.methodRef("func").astParent.isCall.head
+      val assignNode = cpg.methodRefWithName("func").astParent.isCall.head
       assignNode.code shouldBe "func = def func(...)"
     }
 
@@ -72,7 +74,7 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
 
       bindingTypeDecl.name shouldBe "func"
       bindingTypeDecl.fullName shouldBe "test.py:<module>.func"
-      bindingTypeDecl.filename shouldBe "<absoluteTestPath>/test.py"
+      bindingTypeDecl.filename shouldBe "test.py"
       bindingTypeDecl.lineNumber shouldBe Some(1)
       bindingTypeDecl.columnNumber shouldBe Some(1)
 
@@ -130,10 +132,88 @@ class FunctionDefCpgTests extends AnyFreeSpec with Matchers {
         |""".stripMargin)
 
     "test decorator wrapping of method reference" in {
-      cpg.methodRef("func").astParent.astParent.astParent.isCall.head.code shouldBe
-        "func = abc(arg)(staticmethod(def func(...)))"
+      val (staticMethod: Call) :: Nil = cpg.methodRefWithName("func").astParent.l: @unchecked
+      staticMethod.code shouldBe "staticmethod(def func(...))"
+      staticMethod.name shouldBe "staticmethod"
+      val (abc: Call) :: Nil = staticMethod.start.astParent.l: @unchecked
+      abc.code shouldBe "abc(arg)(staticmethod(def func(...)))"
+      abc.name shouldBe ""
+      val (assign: Call) :: Nil = abc.start.astParent.l: @unchecked
+      assign.code shouldBe "func = abc(arg)(staticmethod(def func(...)))"
     }
 
   }
 
+  "type hinted function" - {
+    lazy val cpg = Py2CpgTestContext.buildCpg("""
+        |from typing import List, Optional
+        |
+        |def func1(a: int, b: int) -> float:
+        |  return a / b
+        |
+        |def func2(a: Optional[str] = None) -> List[Union[str | None]]:
+        |    return [a]
+        |
+        |def func3(x : abc.Def):
+        |   return 1.0
+        |
+        |""".stripMargin)
+
+    "test parameter hint of method definition using built-in types" in {
+      cpg.method
+        .name("func1")
+        .parameter
+        .typeFullName
+        .dedup
+        .l shouldBe Seq("__builtin.int")
+    }
+
+    "test parameter hint of method definition using types from 'typing'" in {
+      cpg.method
+        .name("func2")
+        .parameter
+        .typeFullName
+        .dedup
+        .l shouldBe Seq("typing.Optional")
+    }
+
+    "test return hint of method definition using built-in types" in {
+      cpg.method
+        .name("func1")
+        .methodReturn
+        .typeFullName
+        .dedup
+        .l shouldBe Seq("__builtin.float")
+    }
+
+    "test a return hint of method definition using types from 'typing'" in {
+      cpg.method
+        .name("func2")
+        .methodReturn
+        .typeFullName
+        .dedup
+        .l shouldBe Seq("typing.List")
+    }
+
+    "test parameter hint of the form abc.def" in {
+      cpg.method
+        .name("func3")
+        .parameter
+        .typeFullName
+        .dedup
+        .l shouldBe Seq("abc.Def")
+    }
+  }
+
+  "module function" - {
+    lazy val cpg = Py2CpgTestContext.buildCpg("""
+        |""".stripMargin)
+    "test existence of MODULE modifier on module method node" in {
+      cpg.method
+        .name("<module>")
+        .modifier
+        .modifierType(ModifierTypes.MODULE)
+        .nonEmpty shouldBe true
+    }
+  }
 }

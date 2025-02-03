@@ -2,7 +2,7 @@ package io.joern.kotlin2cpg.dataflow
 
 import io.joern.dataflowengineoss.language.toExtendedCfgNode
 import io.joern.kotlin2cpg.testfixtures.KotlinCode2CpgFixture
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class TypeDeclTests extends KotlinCode2CpgFixture(withOssDataflow = true) {
   implicit val resolver: ICallResolver = NoResolve
@@ -29,11 +29,12 @@ class TypeDeclTests extends KotlinCode2CpgFixture(withOssDataflow = true) {
             ("f1(p)", Some(5)),
             ("AClass(p)", Some(6)),
             ("<init>(this, x)", Some(2)),
-            ("this.x = x", Some(-1)),
-            ("RET", Some(-1)),
+            ("this.x = x", Some(2)),
+            ("this.x = x", None),
+            ("RET", None),
             ("AClass(p)", Some(6)),
             ("aClass.printX()", Some(7)),
-            ("printX(this)", Some(3)),
+            ("printX(this)", None),
             ("println(this.x)", Some(3))
           )
         )
@@ -68,10 +69,10 @@ class TypeDeclTests extends KotlinCode2CpgFixture(withOssDataflow = true) {
             ("AnAlias(p)", Some(11)),
             ("<init>(this, q)", Some(5)),
             ("this.x = q", Some(6)),
-            ("RET", Some(-1)),
+            ("RET", None),
             ("AnAlias(p)", Some(11)),
             ("aClass.printX()", Some(12)),
-            ("printX(this)", Some(8)),
+            ("printX(this)", None),
             ("println(this.x)", Some(8))
           )
         )
@@ -104,13 +105,38 @@ class TypeDeclTests extends KotlinCode2CpgFixture(withOssDataflow = true) {
             ("AClass(p)", Some(10)),
             ("<init>(this, q)", Some(4)),
             ("this.x = q", Some(5)),
-            ("RET", Some(-1)),
+            ("RET", None),
             ("AClass(p)", Some(10)),
             ("aClass.printX()", Some(11)),
-            ("printX(this)", Some(7)),
+            ("printX(this)", None),
             ("println(this.x)", Some(7))
           )
         )
+    }
+  }
+
+  "CPG for classes with secondary constructors" should {
+    val cpg = code("""
+        |class AClass {
+        |    var x: String
+        |    constructor(q: String) {
+        |        this.x = q
+        |    }
+        |    constructor(p: String, r: Int) {
+        |        this.x = p
+        |    }
+        |}
+        |""".stripMargin)
+
+    "have their own instance of primaryCtorCall nodes" in {
+      cpg.typeDecl.nameExact("AClass").method.isConstructor.fullName.l shouldBe List(
+        "AClass.<init>:void()",
+        "AClass.<init>:void(java.lang.String)",
+        "AClass.<init>:void(java.lang.String,int)"
+      )
+      val List(call1, call2) = cpg.method.nameExact("<init>").filter(_.parameter.size > 1).call.nameExact("<init>").l
+      call1.method.fullName shouldBe "AClass.<init>:void(java.lang.String)"
+      call2.method.fullName shouldBe "AClass.<init>:void(java.lang.String,int)"
     }
   }
 

@@ -1,18 +1,12 @@
 package io.joern.ghidra2cpg
 
-import io.joern.ghidra2cpg.Frontend._
+import io.joern.ghidra2cpg.Frontend.*
 import io.joern.x2cpg.{X2CpgConfig, X2CpgMain}
 import scopt.OParser
 
 /** Command line configuration parameters
   */
-final case class Config(inputPath: String = "", outputPath: String = X2CpgConfig.defaultOutputPath)
-    extends X2CpgConfig[Config] {
-
-  override def withInputPath(inputPath: String): Config =
-    copy(inputPath = inputPath)
-  override def withOutputPath(x: String): Config = copy(outputPath = x)
-}
+final case class Config() extends X2CpgConfig[Config]
 
 private object Frontend {
 

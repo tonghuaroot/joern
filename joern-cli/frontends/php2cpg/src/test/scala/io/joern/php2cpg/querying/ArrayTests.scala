@@ -1,14 +1,15 @@
 package io.joern.php2cpg.querying
 
-import io.joern.php2cpg.parser.Domain.PhpOperators
 import io.joern.php2cpg.testfixtures.PhpCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.codepropertygraph.generated.nodes.{Block, Call, Identifier, Literal, Local}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class ArrayTests extends PhpCode2CpgFixture {
   "array accesses with variable keys should be represented as index accesses" in {
-    val cpg = code("<?php\n$array[$key]")
+    val cpg = code("""<?php
+        |$array[$key];
+        |""".stripMargin)
 
     inside(cpg.call.l) { case List(indexAccess) =>
       indexAccess.name shouldBe Operators.indexAccess
@@ -28,7 +29,9 @@ class ArrayTests extends PhpCode2CpgFixture {
   }
 
   "array accesses with literal keys should be represented as index accesses" in {
-    val cpg = code("<?php\n$array[0]")
+    val cpg = code("""<?php
+        |$array[0];
+        |""".stripMargin)
 
     inside(cpg.call.l) { case List(indexAccess) =>
       indexAccess.name shouldBe Operators.indexAccess
@@ -46,19 +49,19 @@ class ArrayTests extends PhpCode2CpgFixture {
     }
   }
 
-  "array accesses without keys should be represented as emptyArrayIdx calls" in {
-    val cpg = code("<?php\n$array[]")
+  "assignments using the empty array dimension fetch syntax should be rewritten as array_push" in {
+    val cpg = code("""<?php
+        |function foo($val) {
+        |  $xs[] = $val;
+        |}
+        |""".stripMargin)
 
-    inside(cpg.call.l) { case List(access) =>
-      access.name shouldBe PhpOperators.emptyArrayIdx
-      access.code shouldBe "$array[]"
-      access.lineNumber shouldBe Some(2)
+    inside(cpg.method.name("foo").body.astChildren.l) { case List(xsLocal: Local, arrayPush: Call) =>
+      xsLocal.name shouldBe "xs"
+      xsLocal.lineNumber shouldBe Some(3)
 
-      inside(access.argument.l) { case List(array: Identifier) =>
-        array.name shouldBe "array"
-        array.code shouldBe "$array"
-        array.lineNumber shouldBe Some(2)
-      }
+      arrayPush.name shouldBe "array_push"
+      arrayPush.code shouldBe "$xs[] = $val"
     }
   }
 
@@ -67,14 +70,17 @@ class ArrayTests extends PhpCode2CpgFixture {
         |array(
         |  "A" => 1,
         |  "B" => 2
-        |)
+        |);
         |""".stripMargin)
 
-    inside(cpg.method.internal.body.astChildren.collectAll[Block].l) { case List(arrayBlock) =>
+    inside(cpg.method.internal.body.astChildren.l) { case List(tmpLocal: Local, arrayBlock: Block) =>
+      tmpLocal.name shouldBe "tmp0"
+      tmpLocal.code shouldBe "$tmp0"
+
       inside(arrayBlock.astChildren.l) {
-        case List(tmpLocal: Local, aAssign: Call, bAssign: Call, tmpIdent: Identifier) =>
-          tmpLocal.name shouldBe "tmp0"
-          tmpLocal.code shouldBe "$tmp0"
+        case List(initAssign: Call, aAssign: Call, bAssign: Call, tmpIdent: Identifier) =>
+          initAssign.code shouldBe "$tmp0 = array()"
+          initAssign.lineNumber shouldBe Some(2)
 
           aAssign.code shouldBe "$tmp0[\"A\"] = 1"
           aAssign.lineNumber shouldBe Some(3)
@@ -94,14 +100,17 @@ class ArrayTests extends PhpCode2CpgFixture {
         |array(
         |  "A",
         |  "B"
-        |)
+        |);
         |""".stripMargin)
 
-    inside(cpg.method.internal.body.astChildren.collectAll[Block].l) { case List(arrayBlock) =>
+    inside(cpg.method.internal.body.astChildren.l) { case List(tmpLocal: Local, arrayBlock: Block) =>
+      tmpLocal.name shouldBe "tmp0"
+      tmpLocal.code shouldBe "$tmp0"
+
       inside(arrayBlock.astChildren.l) {
-        case List(tmpLocal: Local, aAssign: Call, bAssign: Call, tmpIdent: Identifier) =>
-          tmpLocal.name shouldBe "tmp0"
-          tmpLocal.code shouldBe "$tmp0"
+        case List(initAssign: Call, aAssign: Call, bAssign: Call, tmpIdent: Identifier) =>
+          initAssign.code shouldBe "$tmp0 = array()"
+          initAssign.lineNumber shouldBe Some(2)
 
           aAssign.code shouldBe "$tmp0[0] = \"A\""
           aAssign.lineNumber shouldBe Some(3)
@@ -120,13 +129,16 @@ class ArrayTests extends PhpCode2CpgFixture {
     val cpg = code("""<?php
         |array(
         |  "2" => "A"
-        |)
+        |);
         |""".stripMargin)
 
-    inside(cpg.method.internal.body.astChildren.collectAll[Block].l) { case List(arrayBlock) =>
-      inside(arrayBlock.astChildren.l) { case List(tmpLocal: Local, assign: Call, tmpIdent: Identifier) =>
-        tmpLocal.name shouldBe "tmp0"
-        tmpLocal.code shouldBe "$tmp0"
+    inside(cpg.method.internal.body.astChildren.l) { case List(tmpLocal: Local, arrayBlock: Block) =>
+      tmpLocal.name shouldBe "tmp0"
+      tmpLocal.code shouldBe "$tmp0"
+
+      inside(arrayBlock.astChildren.l) { case List(initAssign: Call, assign: Call, tmpIdent: Identifier) =>
+        initAssign.code shouldBe "$tmp0 = array()"
+        initAssign.lineNumber shouldBe Some(2)
 
         assign.code shouldBe "$tmp0[2] = \"A\""
         inside(assign.argument.collectAll[Call].argument.l) { case List(array: Identifier, index: Literal) =>
@@ -154,13 +166,16 @@ class ArrayTests extends PhpCode2CpgFixture {
         |  "10" => "F",
         |  "G",
         |  8 => "H",
-        |)
+        |);
         |""".stripMargin)
 
-    inside(cpg.method.internal.body.astChildren.collectAll[Block].l) { case List(arrayBlock) =>
+    inside(cpg.method.internal.body.astChildren.l) { case List(tmpLocal: Local, arrayBlock: Block) =>
+      tmpLocal.name shouldBe "tmp0"
+      tmpLocal.code shouldBe "$tmp0"
+
       inside(arrayBlock.astChildren.l) {
         case List(
-              tmpLocal: Local,
+              initAssign: Call,
               aAssign: Call,
               cAssign: Call,
               fourAssign: Call,
@@ -170,8 +185,8 @@ class ArrayTests extends PhpCode2CpgFixture {
               eightAssign: Call,
               tmpIdent: Identifier
             ) =>
-          tmpLocal.name shouldBe "tmp0"
-          tmpLocal.code shouldBe "$tmp0"
+          initAssign.code shouldBe "$tmp0 = array()"
+          initAssign.lineNumber shouldBe Some(2)
 
           aAssign.code shouldBe "$tmp0[\"A\"] = \"B\""
           cAssign.code shouldBe "$tmp0[0] = \"C\""

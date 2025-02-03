@@ -1,12 +1,13 @@
 package io.joern.php2cpg.querying
 
-import io.joern.php2cpg.astcreation.AstCreator.{NameConstants, TypeConstants}
-import io.joern.php2cpg.parser.Domain.{PhpOperators, PhpDomainTypeConstants}
+import io.joern.php2cpg.astcreation.AstCreator.TypeConstants
+import io.joern.php2cpg.parser.Domain.{PhpDomainTypeConstants, PhpOperators}
 import io.joern.php2cpg.testfixtures.PhpCode2CpgFixture
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators}
+import io.joern.x2cpg.Defines
+import io.joern.x2cpg.utils.IntervalKeyPool
+import io.shiftleft.codepropertygraph.generated.{DispatchTypes, NodeTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{Block, Call, Identifier, Literal, TypeRef}
-import io.shiftleft.passes.IntervalKeyPool
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
 class OperatorTests extends PhpCode2CpgFixture {
@@ -16,8 +17,8 @@ class OperatorTests extends PhpCode2CpgFixture {
   "assignment operators" should {
     "have the correct arguments set" in {
       val cpg = code("""<?php
-                      |$a = 2
-                      |""".stripMargin)
+        |$a = 2;
+        |""".stripMargin)
 
       val assignment = inside(cpg.call.l) {
         case List(call) if call.name == Operators.assignment => call
@@ -53,7 +54,12 @@ class OperatorTests extends PhpCode2CpgFixture {
       )
 
       testData.foreach { case (testCode, expectedType) =>
-        val cpg = code(s"<?php\n$testCode", fileName = s"Test${filenameKeyPool.next}.php")
+        val cpg = code(
+          s"""<?php
+           |$testCode;
+           |""".stripMargin,
+          fileName = s"Test${filenameKeyPool.next}.php"
+        )
         cpg.call.name.l shouldBe expectedType :: Nil
         cpg.call.methodFullName.l shouldBe expectedType :: Nil
         cpg.call.code.l shouldBe testCode :: Nil
@@ -64,8 +70,8 @@ class OperatorTests extends PhpCode2CpgFixture {
   "unary operators" should {
     "have the correct arguments set" in {
       val cpg = code("""<?php
-                      |+$a
-                      |""".stripMargin)
+        |+$a;
+        |""".stripMargin)
 
       val addition = inside(cpg.call.l) {
         case List(call) if call.name == Operators.plus => call
@@ -91,7 +97,12 @@ class OperatorTests extends PhpCode2CpgFixture {
       )
 
       testData.foreach { case (testCode, expectedType) =>
-        val cpg = code(s"<?php\n$testCode", fileName = s"Test${filenameKeyPool.next}.php")
+        val cpg = code(
+          s"""<?php
+           |$testCode;
+           |""".stripMargin,
+          fileName = s"Test${filenameKeyPool.next}.php"
+        )
         cpg.call.name.l shouldBe expectedType :: Nil
         cpg.call.methodFullName.l shouldBe expectedType :: Nil
         cpg.call.code.l shouldBe testCode :: Nil
@@ -102,8 +113,8 @@ class OperatorTests extends PhpCode2CpgFixture {
   "binary operators" should {
     "have the correct arguments set" in {
       val cpg = code("""<?php
-                      |$a + 2
-                      |""".stripMargin)
+        |$a + 2;
+        |""".stripMargin)
 
       val addition = inside(cpg.call.l) {
         case List(call) if call.name == Operators.plus => call
@@ -159,7 +170,12 @@ class OperatorTests extends PhpCode2CpgFixture {
       }
 
       testData.foreach { case (testCode, expectedType) =>
-        val cpg = code(s"<?php\n$testCode", fileName = s"Test${filenameKeyPool.next}.php")
+        val cpg = code(
+          s"""<?php
+             |$testCode;
+             |""".stripMargin,
+          fileName = s"Test${filenameKeyPool.next}.php"
+        )
         cpg.call.name.l shouldBe expectedType :: Nil
         cpg.call.methodFullName.l shouldBe expectedType :: Nil
         cpg.call.code.l shouldBe normalizeLogicalOps(testCode) :: Nil
@@ -169,7 +185,9 @@ class OperatorTests extends PhpCode2CpgFixture {
 
   "cast operations" should {
     "have the correct arguments set" in {
-      val cpg = code("<?php\n(int) $a")
+      val cpg = code("""<?php
+        |(int) $a;
+        |""".stripMargin)
 
       val cast = inside(cpg.call.nameExact(Operators.cast).l) { case List(cast) =>
         cast
@@ -200,7 +218,12 @@ class OperatorTests extends PhpCode2CpgFixture {
       )
 
       testData.foreach { case (testCode, expectedType) =>
-        val cpg = code(s"<?php\n$testCode", fileName = s"Test${filenameKeyPool.next}.php")
+        val cpg = code(
+          s"""<?php
+             |$testCode;
+             |""".stripMargin,
+          fileName = s"Test${filenameKeyPool.next}.php"
+        )
 
         inside(cpg.call.nameExact(Operators.cast).argument(1).l) { case List(typeRef: TypeRef) =>
           typeRef.typeFullName shouldBe expectedType
@@ -212,7 +235,9 @@ class OperatorTests extends PhpCode2CpgFixture {
 
   "isset calls" should {
     "handle a single argument" in {
-      val cpg = code("<?php\nisset($a)")
+      val cpg = code("""<?php
+        |isset($a);
+        |""".stripMargin)
 
       val call = inside(cpg.call.nameExact("isset").l) { case List(call) =>
         call
@@ -231,7 +256,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "handle multiple arguments" in {
-      val cpg = code("<?php\nisset($a, $b, $c)")
+      val cpg = code("""<?php
+        |isset($a, $b, $c);
+        |""".stripMargin)
 
       val call = inside(cpg.call.nameExact("isset").l) { case List(call) =>
         call
@@ -261,10 +288,12 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "print calls should be created correctly" in {
-    val cpg = code("<?php\nprint(\"Hello, world\");")
+    val cpg = code("""<?php
+      |print("Hello, world");
+      |""".stripMargin)
 
     inside(cpg.call.nameExact("print").l) { case List(printCall) =>
-      printCall.methodFullName shouldBe "__builtin.print"
+      printCall.methodFullName shouldBe "print"
       printCall.typeFullName shouldBe TypeConstants.Int
       printCall.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
       printCall.lineNumber shouldBe Some(2)
@@ -277,7 +306,9 @@ class OperatorTests extends PhpCode2CpgFixture {
 
   "ternary operators" should {
     "be created correctly for general cond ? then : else style operators" in {
-      val cpg = code("<?php\n$a ? $b : $c")
+      val cpg = code("""<?php
+        |$a ? $b : $c;
+        |""".stripMargin)
 
       val call = inside(cpg.call.nameExact(Operators.conditional).l) { case List(conditionalOp) =>
         conditionalOp
@@ -303,11 +334,11 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "be created correctly for the shorthand elvis operator" in {
-      val cpg = code("<?php\n$a ?: $b")
-      val call = inside(cpg.call.nameExact(PhpOperators.elvisOp).l) { case List(elvisOp) =>
-        elvisOp
-      }
+      val cpg = code("""<?php
+        |$a ?: $b;
+        |""".stripMargin)
 
+      val call = inside(cpg.call.nameExact(PhpOperators.elvisOp).l) { case List(elvisOp) => elvisOp }
       call.methodFullName shouldBe PhpOperators.elvisOp
       call.code shouldBe "$a ?: $b"
       call.lineNumber shouldBe Some(2)
@@ -325,7 +356,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "the clone operator should be represented with the correct call node" in {
-    val cpg = code("<?php\nclone $x")
+    val cpg = code("""<?php
+      |clone $x;
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(cloneCall) =>
       cloneCall.name shouldBe "clone"
@@ -342,7 +375,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "the empty call should be represented with the correct call node" in {
-    val cpg = code("<?php\nempty($x)")
+    val cpg = code("""<?php
+      |empty($x);
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(emptyCall) =>
       emptyCall.name shouldBe "empty"
@@ -359,7 +394,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "the eval call should be represented with the correct call node" in {
-    val cpg = code("<?php\neval($x)")
+    val cpg = code("""<?php
+      |eval($x);
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(evalCall) =>
       evalCall.name shouldBe "eval"
@@ -377,7 +414,9 @@ class OperatorTests extends PhpCode2CpgFixture {
 
   "exit statements" should {
     "be represented with an empty arg list if no args are given" in {
-      val cpg = code("<?php\nexit;")
+      val cpg = code("""<?php
+        |exit;
+        |""".stripMargin)
       inside(cpg.call.l) { case List(exitCall) =>
         exitCall.name shouldBe "exit"
         exitCall.methodFullName shouldBe PhpOperators.exitFunc
@@ -390,7 +429,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "be represented with an empty arg list if an empty args list is given" in {
-      val cpg = code("<?php\nexit();")
+      val cpg = code("""<?php
+        |exit();
+        |""".stripMargin)
       inside(cpg.call.l) { case List(exitCall) =>
         exitCall.name shouldBe "exit"
         exitCall.methodFullName shouldBe PhpOperators.exitFunc
@@ -403,7 +444,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "have the correct arg child if an arg is given" in {
-      val cpg = code("<?php\nexit(0);")
+      val cpg = code("""<?php
+        |exit(0);
+        |""".stripMargin)
       inside(cpg.call.l) { case List(exitCall) =>
         exitCall.name shouldBe "exit"
         exitCall.methodFullName shouldBe PhpOperators.exitFunc
@@ -419,7 +462,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "the error suppress operator should work" in {
-    val cpg = code("<?php\n@foo();")
+    val cpg = code("""<?php
+      |@foo();
+      |""".stripMargin)
 
     inside(cpg.call.nameExact(PhpOperators.errorSuppress).l) { case List(errorSuppress) =>
       errorSuppress.methodFullName shouldBe PhpOperators.errorSuppress
@@ -433,7 +478,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "instanceof with a simple class name should work" in {
-    val cpg = code("<?php\n$foo instanceof Foo")
+    val cpg = code("""<?php
+      |$foo instanceof Foo;
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(instanceOfCall) =>
       instanceOfCall.name shouldBe Operators.instanceOf
@@ -450,30 +497,11 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
   }
 
-  "temporary list implementation should work" in {
-    // TODO This is a simple placeholder implementation that represents most of the useful information
-    //  in the AST, while being pretty much unusable for dataflow. A better implementation needs to follow.
-    val cpg = code("<?php\nlist($a, $b) = $arr;")
-
-    inside(cpg.call.nameExact("list").l) { case List(listCall: Call) =>
-      listCall.methodFullName shouldBe PhpOperators.listFunc
-      listCall.code shouldBe "list($a,$b)"
-      listCall.lineNumber shouldBe Some(2)
-      inside(listCall.argument.l) { case List(aArg: Identifier, bArg: Identifier) =>
-        aArg.name shouldBe "a"
-        aArg.code shouldBe "$a"
-        aArg.lineNumber shouldBe Some(2)
-
-        bArg.name shouldBe "b"
-        bArg.code shouldBe "$b"
-        bArg.lineNumber shouldBe Some(2)
-      }
-    }
-  }
-
   "include calls" should {
     "be correctly represented for normal includes" in {
-      val cpg = code("<?php\ninclude 'path';")
+      val cpg = code("""<?php
+        |include 'path';
+        |""".stripMargin)
 
       inside(cpg.call.l) { case List(includeCall: Call) =>
         includeCall.name shouldBe "include"
@@ -486,7 +514,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "be correctly represented for include_once" in {
-      val cpg = code("<?php\ninclude_once 'path';")
+      val cpg = code("""<?php
+        |include_once 'path';
+        |""".stripMargin)
 
       inside(cpg.call.l) { case List(includeOnceCall: Call) =>
         includeOnceCall.name shouldBe "include_once"
@@ -499,7 +529,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "be correctly represented for normal requires" in {
-      val cpg = code("<?php\nrequire 'path';")
+      val cpg = code("""<?php
+        |require 'path';
+        |""".stripMargin)
 
       inside(cpg.call.l) { case List(requireCall: Call) =>
         requireCall.name shouldBe "require"
@@ -512,7 +544,9 @@ class OperatorTests extends PhpCode2CpgFixture {
     }
 
     "be correctly represented for require once" in {
-      val cpg = code("<?php\nrequire_once 'path';")
+      val cpg = code("""<?php
+        |require_once 'path';
+        |""".stripMargin)
 
       inside(cpg.call.l) { case List(requireOnce: Call) =>
         requireOnce.name shouldBe "require_once"
@@ -526,7 +560,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "declare calls without statements should be correctly represented" in {
-    val cpg = code("<?php\ndeclare(ticks=1, encoding='UTF-8');")
+    val cpg = code("""<?php
+      |declare(ticks=1, encoding='UTF-8');
+      |""".stripMargin)
 
     val declareCall = inside(cpg.method.nameExact(NamespaceTraversal.globalNamespaceName).l) {
       case List(globalMethod) =>
@@ -568,7 +604,7 @@ class OperatorTests extends PhpCode2CpgFixture {
 
   "declare calls with an empty statement list should have the correct block structure" in {
     val cpg = code("""<?php
-        |declare(ticks=1) {}
+        |declare(ticks=1) {};
         |""".stripMargin)
 
     val declareBlock = inside(cpg.method.nameExact(NamespaceTraversal.globalNamespaceName).l) {
@@ -586,7 +622,7 @@ class OperatorTests extends PhpCode2CpgFixture {
   "declare calls with non-empty statement lists should have the correct block structure" in {
     val cpg = code("""<?php
         |declare(ticks=1) {
-        |  echo $x;
+        |  echo "Hello, world!";
         |}
         |""".stripMargin)
 
@@ -599,17 +635,19 @@ class OperatorTests extends PhpCode2CpgFixture {
 
     inside(declareBlock.astChildren.l) { case List(declareCall: Call, echoCall: Call) =>
       declareCall.code shouldBe "declare(ticks=1)"
-      echoCall.code shouldBe "echo $x"
+      echoCall.code shouldBe "echo \"Hello, world!\""
     }
   }
 
   "shell_exec calls should be handled" in {
-    val cpg = code("<?php\n`ls -la`")
+    val cpg = code("""<?php
+      |`ls -la`;
+      |""".stripMargin)
 
     inside(cpg.call.name("shell_exec").l) { case List(shellCall) =>
-      shellCall.methodFullName shouldBe "__builtin.shell_exec"
+      shellCall.methodFullName shouldBe "shell_exec"
       shellCall.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
-      shellCall.code shouldBe "`ls -la`"
+      shellCall.code shouldBe "`\"ls -la\"`"
       shellCall.lineNumber shouldBe Some(2)
 
       inside(shellCall.argument.l) { case List(command: Literal) =>
@@ -619,11 +657,13 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "unset calls should be handled" in {
-    val cpg = code("<?php\nunset($a, $b)")
+    val cpg = code("""<?php
+      |unset($a, $b);
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(unsetCall) =>
       unsetCall.name shouldBe "unset"
-      unsetCall.methodFullName shouldBe "__builtin.unset"
+      unsetCall.methodFullName shouldBe "unset"
       unsetCall.code shouldBe "unset($a, $b)"
       unsetCall.dispatchType shouldBe DispatchTypes.STATIC_DISPATCH
       unsetCall.lineNumber shouldBe Some(2)
@@ -641,7 +681,9 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "global calls should handle simple and non-simple args" in {
-    val cpg = code("<?php\nglobal $a, $$b")
+    val cpg = code("""<?php
+      |global $a, $$b;
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(globalCall) =>
       globalCall.name shouldBe "global"
@@ -657,13 +699,71 @@ class OperatorTests extends PhpCode2CpgFixture {
   }
 
   "calls to builtins defined in resources/builtin_functions.txt should be handled correctly" in {
-    val cpg = code("<?php\nabs($a)")
+    val cpg = code("""<?php
+      |abs($a);
+      |""".stripMargin)
 
     inside(cpg.call.l) { case List(absCall) =>
       absCall.name shouldBe "abs"
-      absCall.methodFullName shouldBe "__builtin.abs"
+      absCall.methodFullName shouldBe "abs"
       absCall.code shouldBe "abs($a)"
-      absCall.signature.isEmpty shouldBe true
+      absCall.signature shouldBe s"${Defines.UnresolvedSignature}(1)"
+    }
+  }
+
+  "array/list unpacking should be lowered to several assignments" in {
+    val cpg = code("""<?php
+        |list(list($a, $b), $c, "d" => $d) = $arr;
+        |""".stripMargin)
+    // finds the block containing the assignments
+    val block = cpg.all.collect { case block: Block if block.lineNumber.contains(2) => block }.head
+    inside(block.astChildren.assignment.l) { case tmp0 :: tmp1 :: tmp2 :: a :: b :: c :: d :: Nil =>
+      tmp0.code shouldBe "$tmp0 = $arr"
+      tmp0.source.label shouldBe NodeTypes.IDENTIFIER
+      tmp0.source.code shouldBe "$arr"
+      tmp0.target.label shouldBe NodeTypes.IDENTIFIER
+      tmp0.target.code shouldBe "$tmp0"
+
+      tmp1.code shouldBe "$tmp1 = $tmp0[0]"
+      tmp1.source.label shouldBe NodeTypes.CALL
+      tmp1.source.asInstanceOf[Call].name shouldBe Operators.indexAccess
+      tmp1.source.code shouldBe "$tmp0[0]"
+      tmp1.target.label shouldBe NodeTypes.IDENTIFIER
+      tmp1.target.code shouldBe "$tmp1"
+
+      tmp2.code shouldBe "$tmp2 = $tmp1"
+      tmp2.source.label shouldBe NodeTypes.IDENTIFIER
+      tmp2.source.code shouldBe "$tmp1"
+      tmp2.target.label shouldBe NodeTypes.IDENTIFIER
+      tmp2.target.code shouldBe "$tmp2"
+
+      a.code shouldBe "$a = $tmp2[0]"
+      a.source.label shouldBe NodeTypes.CALL
+      a.source.asInstanceOf[Call].name shouldBe Operators.indexAccess
+      a.source.code shouldBe "$tmp2[0]"
+      a.target.label shouldBe NodeTypes.IDENTIFIER
+      a.target.code shouldBe "$a"
+
+      b.code shouldBe "$b = $tmp2[1]"
+      b.source.label shouldBe NodeTypes.CALL
+      b.source.asInstanceOf[Call].name shouldBe Operators.indexAccess
+      b.source.code shouldBe "$tmp2[1]"
+      b.target.label shouldBe NodeTypes.IDENTIFIER
+      b.target.code shouldBe "$b"
+
+      c.code shouldBe "$c = $tmp0[1]"
+      c.source.label shouldBe NodeTypes.CALL
+      c.source.asInstanceOf[Call].name shouldBe Operators.indexAccess
+      c.source.code shouldBe "$tmp0[1]"
+      c.target.label shouldBe NodeTypes.IDENTIFIER
+      c.target.code shouldBe "$c"
+
+      d.code shouldBe "$d = $tmp0[\"d\"]"
+      d.source.label shouldBe NodeTypes.CALL
+      d.source.asInstanceOf[Call].name shouldBe Operators.indexAccess
+      d.source.code shouldBe "$tmp0[\"d\"]"
+      d.target.label shouldBe NodeTypes.IDENTIFIER
+      d.target.code shouldBe "$d"
     }
   }
 }

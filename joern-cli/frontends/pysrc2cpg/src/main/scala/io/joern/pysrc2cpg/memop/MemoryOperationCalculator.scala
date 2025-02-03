@@ -1,6 +1,23 @@
 package io.joern.pysrc2cpg.memop
 
-import io.joern.pythonparser.ast.{FormattedValue, JoinedString, JoinedStringConstant}
+import io.joern.pythonparser.ast.{
+  FormattedValue,
+  JoinedString,
+  JoinedStringConstant,
+  MatchAs,
+  MatchCase,
+  MatchClass,
+  MatchMapping,
+  MatchOr,
+  MatchSequence,
+  MatchSingleton,
+  MatchStar,
+  MatchValue,
+  ParamSpec,
+  TypeAlias,
+  TypeVar,
+  TypeVarTuple
+}
 import io.joern.pythonparser.{AstVisitor, ast}
 
 import scala.collection.mutable
@@ -84,6 +101,8 @@ class MemoryOperationCalculator extends AstVisitor[Unit] {
     pop()
   }
 
+  override def visit(typeAlias: TypeAlias): Unit = {}
+
   override def visit(annAssign: ast.AnnAssign): Unit = {
     push(Store)
     accept(annAssign.target)
@@ -149,6 +168,13 @@ class MemoryOperationCalculator extends AstVisitor[Unit] {
   override def visit(withStmt: ast.AsyncWith): Unit = {
     accept(withStmt.items)
     accept(withStmt.body)
+  }
+
+  override def visit(matchStmt: ast.Match): Unit = {
+    push(Load)
+    accept(matchStmt.subject)
+    accept(matchStmt.cases)
+    pop()
   }
 
   override def visit(raise: ast.Raise): Unit = {
@@ -480,5 +506,48 @@ class MemoryOperationCalculator extends AstVisitor[Unit] {
     pop()
   }
 
+  override def visit(matchCase: MatchCase): Unit = {
+    accept(matchCase.pattern)
+    accept(matchCase.guard)
+    accept(matchCase.body)
+  }
+
+  override def visit(matchValue: MatchValue): Unit = {
+    accept(matchValue.value)
+  }
+
+  override def visit(matchSingleton: MatchSingleton): Unit = {}
+
+  override def visit(matchSequence: MatchSequence): Unit = {
+    accept(matchSequence.patterns)
+  }
+
+  override def visit(matchMapping: MatchMapping): Unit = {
+    accept(matchMapping.keys)
+    accept(matchMapping.patterns)
+  }
+
+  override def visit(matchClass: MatchClass): Unit = {
+    accept(matchClass.cls)
+    accept(matchClass.patterns)
+    accept(matchClass.kwd_patterns)
+  }
+
+  override def visit(matchStar: MatchStar): Unit = {}
+
+  override def visit(matchAs: MatchAs): Unit = {
+    accept(matchAs.pattern)
+  }
+
+  override def visit(matchOr: MatchOr): Unit = {
+    accept(matchOr.patterns)
+  }
+
   override def visit(typeIgnore: ast.TypeIgnore): Unit = {}
+
+  override def visit(typeVar: TypeVar): Unit = {}
+
+  override def visit(paramSpec: ParamSpec): Unit = {}
+
+  override def visit(typeVarTuple: TypeVarTuple): Unit = {}
 }

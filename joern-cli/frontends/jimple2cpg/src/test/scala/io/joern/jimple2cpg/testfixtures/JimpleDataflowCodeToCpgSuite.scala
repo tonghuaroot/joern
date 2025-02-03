@@ -1,16 +1,16 @@
 package io.joern.jimple2cpg.testfixtures
 
-import io.joern.dataflowengineoss.language.Path
+import io.joern.dataflowengineoss.DefaultSemantics
 import io.joern.dataflowengineoss.layers.dataflows.{OssDataFlow, OssDataFlowOptions}
 import io.joern.dataflowengineoss.queryengine.EngineContext
+import io.joern.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
 import io.joern.x2cpg.testfixtures.Code2CpgFixture
 import io.shiftleft.codepropertygraph.generated.Cpg
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.layers.LayerCreatorContext
-import overflowdb.traversal.Traversal
 
-class JimpleDataflowTestCpg extends JimpleTestCpg {
+class JimpleDataflowTestCpg(val semantics: Semantics = DefaultSemantics()) extends JimpleTestCpg {
 
   implicit val resolver: ICallResolver           = NoResolve
   implicit lazy val engineContext: EngineContext = EngineContext()
@@ -18,19 +18,20 @@ class JimpleDataflowTestCpg extends JimpleTestCpg {
   override def applyPasses(): Unit = {
     super.applyPasses()
     val context = new LayerCreatorContext(this)
-    val options = new OssDataFlowOptions()
+    val options = new OssDataFlowOptions(semantics = semantics)
     new OssDataFlow(options).run(context)
   }
 
 }
 
-class JimpleDataFlowCodeToCpgSuite extends Code2CpgFixture(() => new JimpleDataflowTestCpg()) {
+class JimpleDataFlowCodeToCpgSuite(val semantics: Semantics = DefaultSemantics())
+    extends Code2CpgFixture(() => new JimpleDataflowTestCpg(semantics)) {
 
   implicit var context: EngineContext = EngineContext()
 
   def getConstSourceSink(methodName: String, sourceCode: String = "\"MALICIOUS\"", sinkPattern: String = ".*println.*")(
     implicit cpg: Cpg
-  ): (Traversal[Literal], Traversal[Expression]) = {
+  ): (Iterator[Literal], Iterator[Expression]) = {
     getMultiFnSourceSink(methodName, methodName, sourceCode, sinkPattern)
   }
 
@@ -39,7 +40,7 @@ class JimpleDataFlowCodeToCpgSuite extends Code2CpgFixture(() => new JimpleDataf
     sinkMethodName: String,
     sourceCode: String = "\"MALICIOUS\"",
     sinkPattern: String = ".*println.*"
-  )(implicit cpg: Cpg): (Traversal[Literal], Traversal[Expression]) = {
+  )(implicit cpg: Cpg): (Iterator[Literal], Iterator[Expression]) = {
     val sourceMethod = cpg.method(s".*$sourceMethodName").head
     val sinkMethod   = cpg.method(s".*$sinkMethodName").head
 

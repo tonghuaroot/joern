@@ -2,8 +2,7 @@ package io.joern.javasrc2cpg.querying
 
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
-import io.shiftleft.semanticcpg.language._
-import overflowdb.traversal._
+import io.shiftleft.semanticcpg.language.*
 
 class MethodParameterTests2 extends JavaSrcCode2CpgFixture {
   "non generic method" should {
@@ -20,7 +19,7 @@ class MethodParameterTests2 extends JavaSrcCode2CpgFixture {
       param.order shouldBe 0
       param.index shouldBe 0
       param.lineNumber shouldBe Some(3)
-      param.columnNumber shouldBe None
+      param.columnNumber shouldBe Some(3)
       param.typeFullName shouldBe "Foo"
       param.evaluationStrategy shouldBe EvaluationStrategies.BY_SHARING
     }
@@ -134,6 +133,48 @@ class MethodParameterTests2 extends JavaSrcCode2CpgFixture {
         val List(param) = cpg.method.name("foo").parameter.name("p1").l
         param.typeFullName shouldBe "java.lang.Number"
       }
+    }
+  }
+
+  "imported method parameter's external, non-generic type" should {
+    val cpg = code("""
+        |import foo.bar.Baz;
+        |class Main {
+        | void run(Baz p1) {}
+        |}
+        |""".stripMargin)
+
+    "have correct type for parameter p1" in {
+      val List(param) = cpg.method.name("run").parameter.name("p1").l
+      param.typeFullName shouldBe "foo.bar.Baz"
+    }
+  }
+
+  "imported method parameter's internal, generic type" should {
+    val cpg = code("""
+        |import java.util.*;
+        |class Main {
+        | void run(List<String> p1) {}
+        |}
+        |""".stripMargin)
+
+    "have correct type for parameter p1" in {
+      val List(param) = cpg.method.name("run").parameter.name("p1").l
+      param.typeFullName shouldBe "java.util.List"
+    }
+  }
+
+  "imported method parameter's external, generic type" should {
+    val cpg = code("""
+        |import foo.bar.Baz;
+        |class Main {
+        |  void run(Baz<String> p1) {}
+        |}
+        |""".stripMargin)
+
+    "have correct type for parameter p1" in {
+      val List(param) = cpg.method.name("run").parameter.name("p1").l
+      param.typeFullName shouldBe "foo.bar.Baz"
     }
   }
 }

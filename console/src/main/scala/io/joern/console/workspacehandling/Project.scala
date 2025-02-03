@@ -1,8 +1,8 @@
 package io.joern.console.workspacehandling
 
-import better.files.Dsl._
+import better.files.Dsl.*
 import better.files.File
-import io.shiftleft.codepropertygraph.Cpg
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.semanticcpg.Overlays
 
 import java.nio.file.Path
@@ -26,6 +26,8 @@ case class Project(projectFile: ProjectFile, var path: Path, var cpg: Option[Cpg
   def name: String = projectFile.name
 
   def inputPath: String = projectFile.inputPath
+
+  def isOpen: Boolean = cpg.isDefined
 
   def appliedOverlays: Seq[String] = {
     cpg.map(Overlays.appliedOverlays).getOrElse(Nil)
@@ -55,7 +57,7 @@ case class Project(projectFile: ProjectFile, var path: Path, var cpg: Option[Cpg
   def close: Project = {
     cpg.foreach { c =>
       c.close()
-      System.err.println("Turning working copy into new persistent CPG")
+      System.err.println(s"closing/saving project `$name`")
       val workingCopy = path.resolve(workCpgFileName)
       val persistent  = path.resolve(persistentCpgFileName)
       cp(workingCopy, persistent)

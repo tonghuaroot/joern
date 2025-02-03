@@ -3,7 +3,7 @@ package io.joern.c2cpg.dataflow
 import io.joern.c2cpg.testfixtures.DataFlowCodeToCpgSuite
 import io.joern.dataflowengineoss.passes.reachingdef.ReachingDefFlowGraph
 import io.shiftleft.codepropertygraph.generated.nodes.Identifier
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 
 class ReachingDefTests extends DataFlowCodeToCpgSuite {
 
@@ -64,7 +64,7 @@ class ReachingDefTests extends DataFlowCodeToCpgSuite {
       id.name shouldBe "y"
 
       val List(ret) = cpg.method("foo").ast.isReturn.l
-      flowGraph.succ(ret).toSet shouldBe Set(paramOut1)
+      flowGraph.succ(ret).iterator.to(Set) shouldBe Set(paramOut1)
       flowGraph.succ(paramOut1) shouldBe List(paramOut2)
       flowGraph.succ(paramOut2) shouldBe List(fooMethod.methodReturn)
     }

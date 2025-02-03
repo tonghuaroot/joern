@@ -1,8 +1,8 @@
 package io.joern.dataflowengineoss.queryengine
 
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.semanticcpg.accesspath._
-import io.shiftleft.semanticcpg.language.{AccessPathHandling, toCallMethods}
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.semanticcpg.accesspath.*
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.utils.MemberAccess
 import org.slf4j.LoggerFactory
 
@@ -39,6 +39,9 @@ object AccessPathUsage {
           val (base, tail) = toTrackedBaseAndAccessPathInternal(argOne.get)
           val path         = AccessPathHandling.memberAccessToPath(memberAccess, tail)
           (base, path)
+        case _ =>
+          logger.warn(s"Missing handling for node type ${node.getClass}.")
+          (TrackedUnknown, Nil)
       }
     }
   }

@@ -3,7 +3,7 @@ package io.joern.javasrc2cpg.querying
 import io.joern.javasrc2cpg.testfixtures.JavaSrcCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.ModifierTypes
 import io.shiftleft.codepropertygraph.generated.nodes.Return
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.FileTraversal
 
 import java.io.File
@@ -109,7 +109,8 @@ class NewTypeDeclTests extends JavaSrcCode2CpgFixture {
 }
 class TypeDeclTests extends JavaSrcCode2CpgFixture {
 
-  val cpg = code("""
+  val cpg = code(
+    """
       | package a.b.c.d;
       | class Bar extends Woo {
       |   int x;
@@ -144,7 +145,9 @@ class TypeDeclTests extends JavaSrcCode2CpgFixture {
       |
       |   public void enumMethod() {}
       | }
-      | """.stripMargin)
+      | """.stripMargin,
+    fileName = "Foo.java"
+  )
 
   "should create a default constructor if no constructor is defined" in {
     val typeFullName = "a.b.c.d.OuterClass$InnerClass$InnerClass2"
@@ -161,7 +164,8 @@ class TypeDeclTests extends JavaSrcCode2CpgFixture {
       ModifierTypes.PUBLIC
     )
 
-    constructor.parameter.size shouldBe 1
+    constructor.parameter.size shouldBe 2
+    constructor.parameter.name.toList shouldBe List("this", "outerClass")
     val thisParam = constructor.parameter.head
     thisParam.name shouldBe "this"
     thisParam.typeFullName shouldBe typeFullName
@@ -182,11 +186,7 @@ class TypeDeclTests extends JavaSrcCode2CpgFixture {
     x.inheritsFromTypeFullName should contain theSameElementsAs List("a.b.c.d.Woo")
     x.aliasTypeFullName shouldBe None
     x.order shouldBe 1
-    x.filename should (
-      startWith(File.separator) or // Unix
-        startWith regex "[A-Z]:"   // Windows
-    )
-    x.filename.endsWith(".java") shouldBe true
+    x.filename shouldBe "Foo.java"
   }
 
   "should contain type decl for external type `int`" in {

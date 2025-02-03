@@ -1,12 +1,14 @@
 package io.joern.c2cpg.passes.ast
 
-import io.joern.c2cpg.testfixtures.CCodeToCpgSuite
+import io.joern.c2cpg.testfixtures.C2CpgSuite
 import io.shiftleft.codepropertygraph.generated.EvaluationStrategies
 import io.shiftleft.codepropertygraph.generated.NodeTypes
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.Operators
+import io.shiftleft.codepropertygraph.generated.nodes.Identifier
+import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
-class MethodTests extends CCodeToCpgSuite {
+class MethodTests extends C2CpgSuite {
 
   "MethodTest1" should {
     val cpg = code("""
@@ -17,8 +19,8 @@ class MethodTests extends CCodeToCpgSuite {
       inside(cpg.method.name("main").l) { case List(x) =>
         x.name shouldBe "main"
         x.fullName shouldBe "main"
-        x.code shouldBe "int main (int argc,char **argv)"
-        x.signature shouldBe "int main (int,char**)"
+        x.code should startWith("int main(int argc, char **argv) {")
+        x.signature shouldBe "int(int,char**)"
         x.isExternal shouldBe false
         x.order shouldBe 1
         x.filename shouldBe "Test0.c"
@@ -92,7 +94,7 @@ class MethodTests extends CCodeToCpgSuite {
         data.index shouldBe 1
         data.name shouldBe "data"
         data.code shouldBe "int &data"
-        data.typeFullName shouldBe "int"
+        data.typeFullName shouldBe "int&"
         data.isVariadic shouldBe false
       }
     }
@@ -111,8 +113,8 @@ class MethodTests extends CCodeToCpgSuite {
     "should be correct for methods with line breaks / whitespace" in {
       inside(cpg.method("foo").l) { case List(foo) =>
         foo.name shouldBe "foo"
-        foo.fullName shouldBe "foo<A,B,C>"
-        foo.signature shouldBe "void foo<A,B,C> ()"
+        foo.fullName shouldBe "foo<A, B, C>:void()"
+        foo.signature shouldBe "void()"
       }
     }
   }
@@ -128,12 +130,12 @@ class MethodTests extends CCodeToCpgSuite {
       val List(method) = cpg.method.nameExact("foo").l
       method.isExternal shouldBe false
       method.fullName shouldBe "foo"
-      method.signature shouldBe "int foo (int,int)"
+      method.signature shouldBe "int(int,int)"
       method.lineNumber shouldBe Option(2)
       method.columnNumber shouldBe Option(1)
       method.lineNumberEnd shouldBe Option(4)
       method.columnNumberEnd shouldBe Option(1)
-      method.code shouldBe "int foo (int x,int y)"
+      method.code should startWith("int foo(int x, int y) {")
     }
 
     "have correct METHOD_PARAMETER_IN nodes for method foo" in {
@@ -249,4 +251,205 @@ class MethodTests extends CCodeToCpgSuite {
     }
   }
 
+  "MethodTest9" should {
+    val cpg = code(
+      """
+        |int main(char **argv, int argc) {
+        |  return abs(argc);
+        |}
+        |
+        |int abs(int j);
+        |int abs(int j);
+        |int abs(int j);
+        |""".stripMargin,
+      "test.cpp"
+    )
+
+    "deduplicate method forward declarations correctly" in {
+      cpg.method.fullNameExact("abs:int(int)").size shouldBe 1
+      cpg.call.name("abs").callee(NoResolve).size shouldBe 1
+    }
+
+  }
+
+  "Static modifier for methods" should {
+    "be correct" in {
+      val cpg = code(
+        """
+          |static void staticCMethodDecl();
+          |static void staticCMethodDef() {}
+          |""".stripMargin,
+        "test.c"
+      ).moreCode(
+        """
+          |class A {
+          |  static void staticCPPMethodDecl();
+          |	 static void staticCPPMethodDef() {}
+          |};
+          |""".stripMargin,
+        "test.cpp"
+      )
+      val List(staticCMethodDecl)   = cpg.method.nameExact("staticCMethodDecl").isStatic.l
+      val List(staticCMethodDef)    = cpg.method.nameExact("staticCMethodDef").isStatic.l
+      val List(staticCPPMethodDecl) = cpg.method.nameExact("staticCPPMethodDecl").isStatic.l
+      val List(staticCPPMethodDef)  = cpg.method.nameExact("staticCPPMethodDef").isStatic.l
+      staticCMethodDecl.fullName shouldBe "staticCMethodDecl"
+      staticCMethodDef.fullName shouldBe "staticCMethodDef"
+      staticCPPMethodDecl.fullName shouldBe "A.staticCPPMethodDecl:void()"
+      staticCPPMethodDef.fullName shouldBe "A.staticCPPMethodDef:void()"
+    }
+  }
+
+  "Name for method parameter in parentheses" should {
+    "be correct" in {
+      val cpg = code("""
+          |int foo(int * (a)) {
+          |  int (x) = a;
+          |  return 2 * *a;
+          |}
+          |""".stripMargin)
+      val List(paramA) = cpg.method("foo").parameter.l
+      paramA.code shouldBe "int * (a)"
+      paramA.typeFullName shouldBe "int*"
+      paramA.name shouldBe "a"
+      cpg.identifier.nameExact("x").size shouldBe 1
+      cpg.method("foo").local.nameExact("x").size shouldBe 1
+    }
+  }
+
+  "Method name, signature and full name tests" should {
+    "be correct for plain C method" in {
+      val cpg = code(
+        """
+          |int method(int);
+          |""".stripMargin,
+        "test.c"
+      )
+      val List(method) = cpg.method.nameExact("method").l
+      method.signature shouldBe "int(int)"
+      method.fullName shouldBe "method"
+    }
+
+    "be correct for C function pointer" in {
+      val cpg = code(
+        """
+          |int (*foo)(int, int) = { 0 };
+          |int (*bar[])(int, int) = { 0 };
+          |""".stripMargin,
+        "test.c"
+      )
+      val List(foo, bar) = cpg.local.l
+      foo.name shouldBe "foo"
+      foo.typeFullName shouldBe "int(*)(int,int)"
+      bar.name shouldBe "bar"
+      bar.typeFullName shouldBe "int(*[])(int,int)"
+    }
+
+    "be correct for plain method CPP" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  int method(int);
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+      val List(method) = cpg.method.nameExact("method").l
+      method.signature shouldBe "int(int)"
+      method.fullName shouldBe "NNN.method:int(int)"
+    }
+
+    "be correct for plain extern C method" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  extern "C" {
+          |    int method(int);
+          |  }
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+      val List(method) = cpg.method.nameExact("method").l
+      method.signature shouldBe "int(int)"
+      method.fullName shouldBe "method"
+    }
+
+    "be correct for class method" in {
+      val cpg = code(
+        """
+          |namespace NNN {
+          |  class CCC {
+          |    int method(int);
+          |  }
+          |}
+          |""".stripMargin,
+        "test.cpp"
+      )
+      val List(method) = cpg.method.nameExact("method").l
+      method.signature shouldBe "int(int)"
+      method.fullName shouldBe "NNN.CCC.method:int(int)"
+    }
+
+    "be correct for class method with implicit member access" in {
+      val cpg = code(
+        """
+          |class A {
+          |  int var;
+          |  void meth();
+          |};
+          |namespace Foo {
+          |  void A::meth() {
+          |    assert(this->var == var);
+          |  }
+          |}""".stripMargin,
+        "test.cpp"
+      )
+      val List(implicitThisParam) = cpg.method.name("meth").parameter.l
+      implicitThisParam.name shouldBe "this"
+      implicitThisParam.typeFullName shouldBe "A"
+      val List(trueVarAccess) = cpg.call.name(Operators.equals).argument.argumentIndex(1).isCall.l
+      trueVarAccess.code shouldBe "this->var"
+      trueVarAccess.name shouldBe Operators.indirectFieldAccess
+      val List(trueThisId, trueVarFieldIdent) = trueVarAccess.argument.l
+      trueThisId.code shouldBe "this"
+      trueThisId.isIdentifier shouldBe true
+      trueThisId.asInstanceOf[Identifier].typeFullName shouldBe "A*"
+      trueThisId._refOut.l shouldBe List(implicitThisParam)
+      trueVarFieldIdent.code shouldBe "var"
+      trueVarFieldIdent.isFieldIdentifier shouldBe true
+
+      val List(varAccess) = cpg.call.name(Operators.equals).argument.argumentIndex(2).isCall.l
+      varAccess.code shouldBe "this->var"
+      varAccess.name shouldBe Operators.indirectFieldAccess
+      val List(thisId, varFieldIdent) = varAccess.argument.l
+      thisId.code shouldBe "this"
+      thisId.isIdentifier shouldBe true
+      thisId.asInstanceOf[Identifier].typeFullName shouldBe "A*"
+      thisId._refOut.l shouldBe List(implicitThisParam)
+      varFieldIdent.code shouldBe "var"
+      varFieldIdent.isFieldIdentifier shouldBe true
+    }
+
+    "be correct for class method in nested class" in {
+      val cpg = code(
+        """class Outer {
+          |  class Inner {
+          |    void Method();
+          |    int member;
+          | };
+          |};
+          |void Outer::Inner::Method() {
+          |  member;
+          |}""".stripMargin,
+        "test.cpp"
+      )
+      cpg.identifier.name("member").size shouldBe 0
+      val List(memberCall) = cpg.call.codeExact("this->member").l
+      memberCall.typeFullName shouldBe "int"
+      memberCall.name shouldBe Operators.indirectFieldAccess
+      memberCall.argument.isIdentifier.typeFullName.l shouldBe List("Outer.Inner*")
+      memberCall.argument.isFieldIdentifier.code.l shouldBe List("member")
+    }
+  }
 }

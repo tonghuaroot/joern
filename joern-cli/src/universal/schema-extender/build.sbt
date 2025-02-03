@@ -1,8 +1,10 @@
 name := "schema-extender"
 
+ThisBuild / scalaVersion := "3.5.2"
+
 val cpgVersion = IO.read(file("cpg-version"))
 
-val generateDomainClasses = taskKey[Seq[File]]("generate overflowdb domain classes for our schema")
+val generateDomainClasses = taskKey[Seq[File]]("generate domain classes for our schema")
 
 val joernInstallPath =
   settingKey[String]("path to joern installation, e.g. `/home/username/bin/joern/joern-cli` or `../../joern/joern-cli`")
@@ -16,7 +18,7 @@ replaceDomainClassesInJoern := {
   val newDomainClassesJar = (domainClasses / Compile / packageBin).value
 
   val targetFile =
-    file(joernInstallPath.value) / "lib" / s"io.shiftleft.codepropertygraph-domain-classes_2.13-$cpgVersion.jar"
+    file(joernInstallPath.value) / "lib" / s"io.shiftleft.codepropertygraph-domain-classes_3-$cpgVersion.jar"
   assert(targetFile.exists, s"target jar assumed to be $targetFile, but that file doesn't exist...")
 
   println(s"copying $newDomainClassesJar to $targetFile")
@@ -27,14 +29,13 @@ ThisBuild / libraryDependencies ++= Seq(
   "io.shiftleft" %% "codepropertygraph-schema"         % cpgVersion,
   "io.shiftleft" %% "codepropertygraph-domain-classes" % cpgVersion
 )
-ThisBuild / scalaVersion := "2.13.5"
 
 lazy val schema = project
   .in(file("schema"))
   .settings(generateDomainClasses := {
-    val outputRoot = target.value / "odb-codegen"
+    val outputRoot = target.value / "fg-codegen"
     FileUtils.deleteRecursively(outputRoot)
-    val invoked = (Compile / runMain).toTask(s" CpgExtCodegen schema/target/odb-codegen").value
+    val invoked = (Compile / runMain).toTask(s" CpgExtCodegen schema/target/fg-codegen").value
     FileUtils.listFilesRecursively(outputRoot)
   })
 

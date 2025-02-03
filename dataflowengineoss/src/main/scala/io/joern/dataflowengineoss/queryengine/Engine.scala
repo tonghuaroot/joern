@@ -1,18 +1,18 @@
 package io.joern.dataflowengineoss.queryengine
 
+import flatgraph.Edge
 import io.joern.dataflowengineoss.DefaultSemantics
-import io.joern.dataflowengineoss.language._
+import io.joern.dataflowengineoss.language.*
 import io.joern.dataflowengineoss.passes.reachingdef.EdgeValidator
 import io.joern.dataflowengineoss.semanticsloader.{FlowSemantic, Semantics}
-import io.shiftleft.codepropertygraph.generated.nodes._
-import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Properties}
-import io.shiftleft.semanticcpg.language._
+import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.EdgeTypes
+import io.shiftleft.semanticcpg.language.*
 import org.slf4j.{Logger, LoggerFactory}
-import overflowdb.Edge
-import overflowdb.traversal.{NodeOps, Traversal}
-import java.util.concurrent._
+
+import java.util.concurrent.*
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
 /** The data flow engine allows determining paths to a set of sinks from a set of sources. To this end, it solves tasks
@@ -22,7 +22,7 @@ import scala.util.{Failure, Success, Try}
   */
 class Engine(context: EngineContext) {
 
-  import Engine._
+  import Engine.*
 
   private val logger: Logger                   = LoggerFactory.getLogger(this.getClass)
   private val executorService: ExecutorService = Executors.newWorkStealingPool()
@@ -205,9 +205,11 @@ object Engine {
   private def elemForEdge(e: Edge, callSiteStack: List[Call] = List())(implicit
     semantics: Semantics
   ): Option[PathElement] = {
-    val curNode  = e.inNode().asInstanceOf[CfgNode]
-    val parNode  = e.outNode().asInstanceOf[CfgNode]
-    val outLabel = Some(e.property(Properties.VARIABLE)).getOrElse("")
+    val curNode = e.dst.asInstanceOf[CfgNode]
+    val parNode = e.src.asInstanceOf[CfgNode]
+    // note: flatgraph only allows at most one property per edge, and since we know :tm: that this is a ReachingDef edge it must be the Variable property...
+    val variablePropertyMaybe = Option(e.property).map(_.asInstanceOf[String])
+    val outLabel              = variablePropertyMaybe.getOrElse("")
 
     if (!EdgeValidator.isValidEdge(curNode, parNode)) {
       return None
@@ -221,7 +223,7 @@ object Engine {
             val sameCallSite   = parentNode.inCall.l == childNode.start.inCall.l
             val visible = if (sameCallSite) {
               val semanticExists         = parentNode.semanticsForCallByArg.nonEmpty
-              val internalMethodsForCall = parentNodeCall.flatMap(methodsForCall).to(Traversal).internal
+              val internalMethodsForCall = parentNodeCall.flatMap(methodsForCall).internal
               (semanticExists && parentNode.isDefined) || internalMethodsForCall.isEmpty
             } else {
               parentNode.isDefined
@@ -241,11 +243,7 @@ object Engine {
   def isOutputArgOfInternalMethod(arg: Expression)(implicit semantics: Semantics): Boolean = {
     arg.inCall.l match {
       case List(call) =>
-        methodsForCall(call)
-          .to(Traversal)
-          .internal
-          .isNotStub
-          .nonEmpty && semanticsForCall(call).isEmpty
+        methodsForCall(call).internal.isNotStub.nonEmpty && semanticsForCall(call).isEmpty
       case _ =>
         false
     }
@@ -258,9 +256,8 @@ object Engine {
   private def ddgInE(node: CfgNode, path: Vector[PathElement], callSiteStack: List[Call] = List()): Vector[Edge] = {
     node
       .inE(EdgeTypes.REACHING_DEF)
-      .asScala
       .filter { e =>
-        e.outNode() match {
+        e.src match {
           case srcNode: CfgNode =>
             !srcNode.isInstanceOf[Method] && !path
               .map(x => x.node)
@@ -271,10 +268,8 @@ object Engine {
       .toVector
   }
 
-  def argToOutputParams(arg: Expression): Traversal[MethodParameterOut] = {
-    argToMethods(arg)
-      .to(Traversal)
-      .parameter
+  def argToOutputParams(arg: Expression): Iterator[MethodParameterOut] = {
+    argToMethods(arg).parameter
       .index(arg.argumentIndex)
       .asOutput
   }
@@ -290,19 +285,14 @@ object Engine {
   }
 
   def isCallToInternalMethod(call: Call): Boolean = {
-    methodsForCall(call)
-      .to(Traversal)
-      .internal
-      .nonEmpty
+    methodsForCall(call).internal.nonEmpty
   }
   def isCallToInternalMethodWithoutSemantic(call: Call)(implicit semantics: Semantics): Boolean = {
     isCallToInternalMethod(call) && semanticsForCall(call).isEmpty
   }
 
   def semanticsForCall(call: Call)(implicit semantics: Semantics): List[FlowSemantic] = {
-    Engine.methodsForCall(call).flatMap { method =>
-      semantics.forMethod(method.fullName)
-    }
+    Engine.methodsForCall(call).flatMap(semantics.forMethod)
   }
 
 }
@@ -322,11 +312,17 @@ case class EngineContext(semantics: Semantics = DefaultSemantics(), config: Engi
   *   an initial (starting node) -> (path-edges) cache to initiate data flow queries with.
   * @param shareCacheBetweenTasks
   *   enables sharing of previously calculated paths among other tasks.
+  * @param maxArgsToAllow
+  *   max limit to determine all corresponding arguments at all call sites to the method
+  * @param maxOutputArgsExpansion
+  *   max limit on number arguments for which tasks will be created for unresolved arguments
   */
 case class EngineConfig(
   var maxCallDepth: Int = 4,
   initialTable: Option[mutable.Map[TaskFingerprint, Vector[ReachableByResult]]] = None,
-  shareCacheBetweenTasks: Boolean = true
+  shareCacheBetweenTasks: Boolean = true,
+  maxArgsToAllow: Int = 1000,
+  maxOutputArgsExpansion: Int = 1000
 )
 
 /** Tracks various performance characteristics of the query engine.
